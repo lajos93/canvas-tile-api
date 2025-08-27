@@ -4,6 +4,20 @@ import { createCanvas } from "canvas";
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+function tileBBox(x: number, y: number, z: number) {
+  const n = 2 ** z;
+
+  const lon_left = (x / n) * 360 - 180;
+  const lon_right = ((x + 1) / n) * 360 - 180;
+
+  const lat_top =
+    (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
+  const lat_bottom =
+    (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 1)) / n))) * 180) / Math.PI;
+
+  return { lon_left, lon_right, lat_top, lat_bottom };
+}
+
 // /node-version endpoint
 app.get("/node-version", (req, res) => {
   res.send(`Node version: ${process.version}`);
@@ -15,16 +29,11 @@ app.get("/tiles/:z/:x/:y.png", async (req, res) => {
     const { z, x, y } = req.params;
     const tileSize = 256;
 
-    // Tile -> koordináták
-    const n = 2 ** Number(z);
-    const lon_left = (Number(x) / n) * 360 - 180;
-    const lon_right = ((Number(x) + 1) / n) * 360 - 180;
-    const lat_top =
-      (Math.atan(Math.sinh(Math.PI * (1 - (2 * Number(y)) / n))) * 180) /
-      Math.PI;
-    const lat_bottom =
-      (Math.atan(Math.sinh(Math.PI * (1 - (2 * (Number(y) + 1)) / n))) * 180) /
-      Math.PI;
+    const { lon_left, lon_right, lat_top, lat_bottom } = tileBBox(
+      Number(x),
+      Number(y),
+      Number(z)
+    );
 
     // Payload API URL environment variable-ből
     const payloadUrl = process.env.PAYLOAD_URL;
@@ -39,7 +48,7 @@ app.get("/tiles/:z/:x/:y.png", async (req, res) => {
 
     while (hasNext) {
       const url = `${payloadUrl}/api/trees?limit=5000&page=${page}&where[lat][greater_than_equal]=${lat_bottom}&where[lat][less_than_equal]=${lat_top}&where[lon][greater_than_equal]=${lon_left}&where[lon][less_than_equal]=${lon_right}`;
-      console.log('Fetching URL:', url); 
+      console.log("Fetching URL:", url);
 
       const resp = await fetch(url);
       if (!resp.ok) {
