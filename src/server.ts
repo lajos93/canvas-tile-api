@@ -39,6 +39,7 @@ app.get("/tiles/:z/:x/:y.png", async (req, res) => {
 
     while (hasNext) {
       const url = `${payloadUrl}/api/trees?limit=5000&page=${page}&where[lat][greater_than_equal]=${lat_bottom}&where[lat][less_than_equal]=${lat_top}&where[lon][greater_than_equal]=${lon_left}&where[lon][less_than_equal]=${lon_right}`;
+      console.log('Fetching URL:', url); 
 
       const resp = await fetch(url);
       if (!resp.ok) {
