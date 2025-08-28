@@ -1,9 +1,12 @@
-import { Router } from "express";
+import express from "express";
 import tilesRouter from "./routes/tiles";
 
-const router = Router();
+const app = express();
+const PORT = process.env.PORT || 3001;
 
-// /tiles
-router.use("/tiles", tilesRouter);
+// /tiles 
+app.use("/tiles", tilesRouter);
 
-export default router;
+app.listen(PORT, () => {
+  console.log(`Tile server running on port ${PORT}`);
+});
