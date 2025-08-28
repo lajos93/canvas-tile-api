@@ -1,3 +1,5 @@
+import "dotenv/config"; 
+
 import express from "express";
 import tilesRouter from "./routes/tiles";
 import generateTilesRouter from "./routes/generateTiles";

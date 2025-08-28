@@ -13,6 +13,8 @@ const s3 = new S3Client({
   },
 });
 
+console.log("S3 region:", process.env.S3_REGION);
+
 const bucketName = process.env.S3_BUCKET!;
 const payloadUrl = process.env.PAYLOAD_URL!;
 
