@@ -29,29 +29,27 @@ function lat2tile(lat: number, zoom: number) {
   return Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** zoom);
 }
 
-// Javított lastTile logika
 async function getLastTile(z: number) {
   const prefix = `tiles/${z}/`;
   const data = await s3.send(new ListObjectsV2Command({ Bucket: bucketName, Prefix: prefix }));
 
   if (!data.Contents || data.Contents.length === 0) return null;
 
-  const lastTile = data.Contents.reduce(
-    (max, obj) => {
-      if (!obj.Key) return max;
-      const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif/);
-      if (!match) return max;
+  let maxX = 0;
+  let maxY = 0;
+  for (const obj of data.Contents) {
+    if (!obj.Key) continue;
+    const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif/); // AVIF kiterjesztés
+    if (match) {
       const x = parseInt(match[1]);
       const y = parseInt(match[2]);
-      if (x > max.x || (x === max.x && y > max.y)) {
-        return { x, y };
+      if (x > maxX || (x === maxX && y > maxY)) {
+        maxX = x;
+        maxY = y;
       }
-      return max;
-    },
-    { x: -1, y: -1 }
-  );
-
-  return lastTile.x >= 0 ? lastTile : null;
+    }
+  }
+  return { x: maxX, y: maxY };
 }
 
 export async function generateTiles(minZoom: number, maxZoom: number) {
@@ -66,6 +64,7 @@ export async function generateTiles(minZoom: number, maxZoom: number) {
     let startY = yMin;
 
     if (lastTile) {
+      // az utolsó tile-tól folytatjuk
       startX = lastTile.x;
       startY = lastTile.y + 1;
       if (startY > yMax) {
@@ -73,6 +72,8 @@ export async function generateTiles(minZoom: number, maxZoom: number) {
         startY = yMin;
       }
       console.log(`Resuming zoom ${z} from tile x=${startX}, y=${startY}`);
+    } else {
+      console.log(`No tiles found yet for zoom ${z}, starting from beginning.`);
     }
 
     const queue = new PQueue({ concurrency: 5 }); // max 5 párhuzamos tile
