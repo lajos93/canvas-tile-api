@@ -17,7 +17,7 @@ app.use("/admin", generateTilesRouter);
 
 app.use("/admin", testUploadRouter);
 
-app.use("admin/download-tiles", downloadTiles);
+app.use("/admin/download-tiles", downloadTiles);
 
 app.listen(PORT, () => {
   console.log(`Tile server running on port ${PORT}`);
