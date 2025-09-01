@@ -87,7 +87,7 @@ export async function generateTiles(minZoom: number, maxZoom: number) {
 
         // Konvertálás AVIF-re
         const avifBuffer = await sharp(pngBuffer)
-          .avif({ quality: 60 }) // minőséget állíthatod 0-100 között
+          .avif({ quality: 30 }) // minőséget állíthatod 0-100 között
           .toBuffer();
 
         const key = `tiles/${z}/${x}/${y}.avif`;
