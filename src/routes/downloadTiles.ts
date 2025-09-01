@@ -1,38 +1,73 @@
 import { Router } from "express";
-import path from "path";
-import fs from "fs";
 import archiver from "archiver";
+import {
+  S3Client,
+  ListObjectsV2Command,
+  GetObjectCommand,
+  ListObjectsV2CommandOutput,
+} from "@aws-sdk/client-s3";
+import { Readable } from "stream";
 
 const router = Router();
 
-// /admin/download-tiles
+const s3 = new S3Client({
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+  },
+});
+
+const bucketName = process.env.S3_BUCKET!;
+
 router.get("/download-tiles", async (req, res) => {
   try {
-    const tilesFolder = path.resolve("./tiles"); // a lokális tiles mappa
-    const zipPath = path.resolve("./tiles.zip");
-
-    // ZIP létrehozása
-    const output = fs.createWriteStream(zipPath);
+    res.attachment("tiles.zip");
     const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.pipe(res);
 
-    output.on("close", () => {
-      console.log(`ZIP created: ${archive.pointer()} bytes`);
-      res.download(zipPath, "tiles.zip", (err) => {
-        if (err) console.error(err);
-        fs.unlinkSync(zipPath);
-      });
-    });
+    let continuationToken: string | undefined = undefined;
 
-    archive.on("error", (err) => {
-      throw err;
-    });
+    do {
+      const listResponse: ListObjectsV2CommandOutput = await s3.send(
+        new ListObjectsV2Command({
+          Bucket: bucketName,
+          Prefix: "tiles/",
+          ContinuationToken: continuationToken,
+        })
+      );
 
-    archive.pipe(output);
-    archive.directory(tilesFolder, false); // mappa tartalmát ZIP-be
+      if (listResponse.Contents) {
+        for (const obj of listResponse.Contents) {
+          if (!obj.Key) continue;
+
+          const getObject = await s3.send(
+            new GetObjectCommand({
+              Bucket: bucketName,
+              Key: obj.Key,
+            })
+          );
+
+          if (!getObject.Body) continue;
+
+          // Node.js Readable stream biztosítása
+          const fileStream: Readable =
+            getObject.Body instanceof Readable
+              ? getObject.Body
+              : Readable.fromWeb(getObject.Body as any);
+
+          // Append a stream to the ZIP
+          archive.append(fileStream, { name: obj.Key.replace(/^tiles\//, "") });
+        }
+      }
+
+      continuationToken = listResponse.NextContinuationToken;
+    } while (continuationToken);
+
     await archive.finalize();
   } catch (err) {
     console.error(err);
-    res.status(500).send("Error creating ZIP of tiles.");
+    res.status(500).send("Error creating ZIP from S3 tiles.");
   }
 });
 
