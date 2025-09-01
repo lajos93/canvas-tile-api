@@ -50,14 +50,15 @@ router.get("/download-tiles", async (req, res) => {
 
           if (!getObject.Body) continue;
 
-          // Node.js Readable stream biztosítása
           const fileStream: Readable =
             getObject.Body instanceof Readable
               ? getObject.Body
               : Readable.fromWeb(getObject.Body as any);
 
-          // Append a stream to the ZIP
-          archive.append(fileStream, { name: obj.Key.replace(/^tiles\//, "") });
+          const entryName = obj.Key.replace(/^tiles\//, "");
+          if (!entryName) continue; // <<< ez a fontos
+
+          archive.append(fileStream, { name: entryName });
         }
       }
 
