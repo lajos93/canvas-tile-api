@@ -25,7 +25,9 @@ function lon2tile(lon: number, zoom: number) {
 
 function lat2tile(lat: number, zoom: number) {
   const latRad = (lat * Math.PI) / 180;
-  return Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** zoom);
+  return Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** zoom
+  );
 }
 
 async function getLastTile(z: number) {
@@ -36,9 +38,10 @@ async function getLastTile(z: number) {
 
   let maxX = 0;
   let maxY = 0;
+
   for (const obj of data.Contents) {
     if (!obj.Key) continue;
-    const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif/); // AVIF kiterjesztés
+    const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif/);
     if (match) {
       const x = parseInt(match[1]);
       const y = parseInt(match[2]);
@@ -48,6 +51,7 @@ async function getLastTile(z: number) {
       }
     }
   }
+
   return { x: maxX, y: maxY };
 }
 
@@ -59,13 +63,6 @@ export async function generateTiles(minZoom: number, maxZoom: number) {
     const yMax = lat2tile(MIN_LAT, z);
 
     const lastTile = await getLastTile(z);
-
-    if (lastTile) {
-      console.log(`Last uploaded tile for zoom ${z}: x=${lastTile.x}, y=${lastTile.y}`);
-    } else {
-      console.log(`No tiles found yet for zoom ${z}, starting from the beginning.`);
-    }
-
     let startX = xMin;
     let startY = yMin;
 
@@ -76,22 +73,21 @@ export async function generateTiles(minZoom: number, maxZoom: number) {
         startX += 1;
         startY = yMin;
       }
+      console.log(`Resuming zoom ${z} from tile x=${startX}, y=${startY}`);
+    } else {
+      console.log(`No tiles found for zoom ${z}, starting from beginning.`);
     }
 
     for (let x = startX; x <= xMax; x++) {
-      for (let y = (x === startX ? startY : yMin); y <= yMax; y++) {
+      for (let y = x === startX ? startY : yMin; y <= yMax; y++) {
         const bbox = tileBBox(x, y, z);
         const trees = await fetchTreesInBBox(payloadUrl, bbox);
         const canvas = drawTreesOnCanvas(trees, bbox);
         const pngBuffer = canvas.toBuffer();
 
-        // Konvertálás AVIF-re
-        const avifBuffer = await sharp(pngBuffer)
-          .avif({ quality: 30 }) // minőséget állíthatod 0-100 között
-          .toBuffer();
+        const avifBuffer = await sharp(pngBuffer).avif({ quality: 30 }).toBuffer();
 
         const key = `tiles/${z}/${x}/${y}.avif`;
-
         await s3.send(
           new PutObjectCommand({
             Bucket: bucketName,
