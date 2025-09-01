@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { tileBBox, fetchTreesInBBox, drawTreesOnCanvas } from "../utils/utils";
+import sharp from "sharp";
 
 const s3 = new S3Client({
   region: process.env.S3_REGION,
@@ -27,7 +28,6 @@ function lat2tile(lat: number, zoom: number) {
   return Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** zoom);
 }
 
-// Lekérdezi az utolsó feltöltött tile-t egy zoom szinten
 async function getLastTile(z: number) {
   const prefix = `tiles/${z}/`;
   const data = await s3.send(new ListObjectsV2Command({ Bucket: bucketName, Prefix: prefix }));
@@ -38,7 +38,7 @@ async function getLastTile(z: number) {
   let maxY = 0;
   for (const obj of data.Contents) {
     if (!obj.Key) continue;
-    const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.png/);
+    const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif/); // AVIF kiterjesztés
     if (match) {
       const x = parseInt(match[1]);
       const y = parseInt(match[2]);
@@ -83,22 +83,26 @@ export async function generateTiles(minZoom: number, maxZoom: number) {
         const bbox = tileBBox(x, y, z);
         const trees = await fetchTreesInBBox(payloadUrl, bbox);
         const canvas = drawTreesOnCanvas(trees, bbox);
-        const buffer = canvas.toBuffer();
+        const pngBuffer = canvas.toBuffer();
 
-        const key = `tiles/${z}/${x}/${y}.png`;
+        // Konvertálás AVIF-re
+        const avifBuffer = await sharp(pngBuffer)
+          .avif({ quality: 60 }) // minőséget állíthatod 0-100 között
+          .toBuffer();
+
+        const key = `tiles/${z}/${x}/${y}.avif`;
 
         await s3.send(
           new PutObjectCommand({
             Bucket: bucketName,
             Key: key,
-            Body: buffer,
-            ContentType: "image/png",
+            Body: avifBuffer,
+            ContentType: "image/avif",
           })
         );
 
-        console.log(`Uploaded tile z${z} x${x} y${y} to S3`);
+        console.log(`Uploaded tile z${z} x${x} y${y} to S3 as AVIF`);
       }
     }
   }
 }
-
