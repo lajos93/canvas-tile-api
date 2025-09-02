@@ -1,40 +1,35 @@
-// utils/s3Utils.ts
-import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, ListObjectsV2Command, ListObjectsV2CommandOutput } from "@aws-sdk/client-s3";
 
-const s3 = new S3Client({
-  region: process.env.S3_REGION,
-  credentials: {
-    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
-  },
-});
+const s3 = new S3Client({ region: process.env.S3_REGION });
 
-const bucketName = process.env.S3_BUCKET!;
-
-export async function getLastTileFolderForZoom(zoom: number) {
+export async function getLastUploadedTile(zoom: number) {
   const prefix = `tiles/${zoom}/`;
-  const data = await s3.send(new ListObjectsV2Command({ Bucket: bucketName, Prefix: prefix }));
+  let continuationToken: string | undefined = undefined;
+  let lastTile: { Key: string; LastModified: Date } | null = null;
 
-  if (!data.Contents || data.Contents.length === 0) return null;
+  do {
+    const data: ListObjectsV2CommandOutput = await s3.send(
+      new ListObjectsV2Command({ Bucket: process.env.S3_BUCKET!, Prefix: prefix, ContinuationToken: continuationToken })
+    );
 
-  // Számoljuk a mappákat (x értékek)
-  const folders: Record<number, number[]> = {}; // x -> y list
-  for (const obj of data.Contents) {
-    if (!obj.Key) continue;
-    const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif/);
-    if (match) {
-      const x = parseInt(match[1]);
-      const y = parseInt(match[2]);
-      if (!folders[x]) folders[x] = [];
-      folders[x].push(y);
+    if (data.Contents) {
+      for (const obj of data.Contents) {
+        if (!obj.Key || !obj.LastModified) continue;
+        if (!obj.Key.endsWith(".avif")) continue;
+
+        if (!lastTile || obj.LastModified > lastTile.LastModified) {
+          lastTile = { Key: obj.Key, LastModified: obj.LastModified };
+        }
+      }
     }
-  }
 
-  const xList = Object.keys(folders).map(Number);
-  const lastX = Math.max(...xList);
-  const lastY = Math.max(...folders[lastX]);
+    continuationToken = data.IsTruncated ? data.NextContinuationToken : undefined;
+  } while (continuationToken);
 
-  const lastKey = `tiles/${zoom}/${lastX}/${lastY}.avif`;
+  if (!lastTile) return null;
 
-  return { zoom, x: lastX, y: lastY, key: lastKey };
+  const match = lastTile.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif$/);
+  if (!match) return null;
+
+  return { x: parseInt(match[1]), y: parseInt(match[2]) };
 }
