@@ -5,6 +5,7 @@ import tilesRouter from "./routes/tiles";
 import generateTilesRouter from "./routes/generateTiles";
 import testUploadRouter from "./routes/testUpload";
 import downloadTiles from "./routes/downloadTiles";
+import lastTileRouter from "./routes/lastTile";
 
 
 const app = express();
@@ -15,6 +16,7 @@ app.use("/tiles", tilesRouter);
 
 // /admin/
 app.use("/admin", generateTilesRouter);
+app.use("/admin", lastTileRouter);
 
 
 app.use("/admin", testUploadRouter);
