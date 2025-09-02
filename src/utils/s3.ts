@@ -11,29 +11,30 @@ const s3 = new S3Client({
 
 const bucketName = process.env.S3_BUCKET!;
 
-export async function getLastTileForZoom(zoom: number) {
+export async function getLastTileFolderForZoom(zoom: number) {
   const prefix = `tiles/${zoom}/`;
   const data = await s3.send(new ListObjectsV2Command({ Bucket: bucketName, Prefix: prefix }));
 
   if (!data.Contents || data.Contents.length === 0) return null;
 
-  let maxX = 0;
-  let maxY = 0;
-  let lastKey = "";
-
+  // Számoljuk a mappákat (x értékek)
+  const folders: Record<number, number[]> = {}; // x -> y list
   for (const obj of data.Contents) {
     if (!obj.Key) continue;
     const match = obj.Key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif/);
     if (match) {
       const x = parseInt(match[1]);
       const y = parseInt(match[2]);
-      if (x > maxX || (x === maxX && y > maxY)) {
-        maxX = x;
-        maxY = y;
-        lastKey = obj.Key;
-      }
+      if (!folders[x]) folders[x] = [];
+      folders[x].push(y);
     }
   }
 
-  return { zoom, x: maxX, y: maxY, key: lastKey };
+  const xList = Object.keys(folders).map(Number);
+  const lastX = Math.max(...xList);
+  const lastY = Math.max(...folders[lastX]);
+
+  const lastKey = `tiles/${zoom}/${lastX}/${lastY}.avif`;
+
+  return { zoom, x: lastX, y: lastY, key: lastKey };
 }
