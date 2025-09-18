@@ -12,8 +12,16 @@ export const resetStop = () => { isStopped = false; };
 // START
 router.get("/start", async (req, res) => {
   try {
+    if (!req.query.zoom) {
+      return res.status(400).json({ error: "Zoom level missing" });
+    }
+
+    const zoom = parseInt(req.query.zoom as string);
+    if (isNaN(zoom)) {
+      return res.status(400).json({ error: "Invalid zoom level" });
+    }
+
     resetStop();
-    const zoom = parseInt(req.query.zoom as string) || 14;
 
     let startX = req.query.startX ? parseInt(req.query.startX as string) : undefined;
     let startY = req.query.startY ? parseInt(req.query.startY as string) : undefined;
@@ -31,13 +39,13 @@ router.get("/start", async (req, res) => {
     await generateTiles(zoom, startX, startY);
 
     if (isStopped) {
-      res.send("Tile process was stopped manually.");
+      res.json({ status: "stopped" });
     } else {
-      res.send(`Tile process completed for zoom ${zoom} from x=${startX}, y=${startY}`);
+      res.json({ status: "completed", zoom, startX, startY });
     }
   } catch (err) {
     console.error(err);
-    res.status(500).send("Error starting tile process.");
+    res.status(500).json({ error: "Error starting tile process" });
   }
 });
 
