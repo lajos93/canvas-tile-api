@@ -2,6 +2,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { tileBBox, fetchTreesInBBox, drawTreesOnCanvas } from "../utils/utils";
 import sharp from "sharp";
 import PQueue from "p-queue";
+import { shouldStop } from "../routes/generateTiles";
 
 const s3 = new S3Client({
   region: process.env.S3_REGION,
@@ -27,7 +28,8 @@ function lon2tile(lon: number, zoom: number) {
 function lat2tile(lat: number, zoom: number) {
   const latRad = (lat * Math.PI) / 180;
   return Math.floor(
-    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** zoom
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
+      2 ** zoom
   );
 }
 
@@ -48,17 +50,28 @@ export async function generateTiles(
   const actualStartX = startX ?? xMin;
   const actualStartY = startY ?? yMin;
 
-  console.log(`Starting generation for zoom ${zoom} from x=${actualStartX}, y=${actualStartY}`);
+  console.log(
+    `Starting generation for zoom ${zoom} from x=${actualStartX}, y=${actualStartY}`
+  );
 
   for (let x = actualStartX; x <= xMax; x++) {
     for (let y = x === actualStartX ? actualStartY : yMin; y <= yMax; y++) {
+      // 👇 itt figyeljük a stop jelet
+      if (shouldStop()) {
+        console.log(`Tile generation STOPPED at x=${x}, y=${y}`);
+        await queue.onIdle(); // megvárja, hogy a futó taskok befejeződjenek
+        return;
+      }
+
       queue.add(async () => {
         const bbox = tileBBox(x, y, zoom);
         const trees = await fetchTreesInBBox(payloadUrl, bbox);
         const canvas = drawTreesOnCanvas(trees, bbox);
         const pngBuffer = canvas.toBuffer();
 
-        const avifBuffer = await sharp(pngBuffer).avif({ quality: 30 }).toBuffer();
+        const avifBuffer = await sharp(pngBuffer)
+          .avif({ quality: 30 })
+          .toBuffer();
 
         const key = `tiles/${zoom}/${x}/${y}.avif`;
         await s3.send(
@@ -83,5 +96,10 @@ export async function generateTiles(
   }
 
   await queue.onIdle();
-  console.log(`Zoom ${zoom} tile generation complete!`);
+
+  if (!shouldStop()) {
+    console.log(`Zoom ${zoom} tile generation complete!`);
+  } else {
+    console.log(`Zoom ${zoom} stopped before completion.`);
+  }
 }
