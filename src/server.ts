@@ -11,6 +11,10 @@ import lastTileRouter from "./routes/lastTile";
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+app.get("/", (req, res) => {
+  res.send("Tile server is running 🚀");
+});
+
 // /tiles 
 app.use("/tiles", tilesRouter);
 
