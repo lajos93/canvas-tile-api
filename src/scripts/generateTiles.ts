@@ -4,6 +4,10 @@ import sharp from "sharp";
 import PQueue from "p-queue";
 import { shouldStop } from "../routes/generateTiles";
 
+const concurrency = parseInt(process.env.TILE_UPLOAD_CONCURRENCY ?? "5", 10);
+console.log(`Using concurrency: ${concurrency}`);
+
+
 const s3 = new S3Client({
   region: process.env.S3_REGION,
   credentials: {
@@ -33,6 +37,8 @@ function lat2tile(lat: number, zoom: number) {
   );
 }
 
+
+
 export async function generateTiles(
   zoom: number,
   startX?: number,
@@ -43,7 +49,7 @@ export async function generateTiles(
   const yMin = lat2tile(MAX_LAT, zoom);
   const yMax = lat2tile(MIN_LAT, zoom);
 
-  const queue = new PQueue({ concurrency: 5 });
+  const queue = new PQueue({ concurrency });
   const batchSize = 1000;
   let batchCount = 0;
 
