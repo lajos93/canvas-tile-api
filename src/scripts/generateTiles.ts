@@ -3,10 +3,10 @@ import PQueue from "p-queue";
 
 import { renderTileToBuffer } from "../utils/tileUtils";
 import { isStopped } from "../utils/stopControl";
-import { TILE_UPLOAD_CONCURRENCY, PAYLOAD_URL } from "../utils/config";
 import { uploadToS3 } from "../utils/s3/s3Utils";
+import { TILE_UPLOAD_CONCURRENCY, PAYLOAD_URL } from "../utils/config";
 
-// Hungary bounding box
+// Magyarország bbox – fix konstans
 const MIN_LAT = 45.7;
 const MAX_LAT = 48.6;
 const MIN_LON = 16.0;
@@ -24,6 +24,9 @@ function lat2tile(lat: number, zoom: number) {
   );
 }
 
+/**
+ * Tile generálás + S3 feltöltés
+ */
 export async function generateTiles(
   zoom: number,
   startX?: number,
@@ -34,13 +37,15 @@ export async function generateTiles(
   const yMin = lat2tile(MAX_LAT, zoom);
   const yMax = lat2tile(MIN_LAT, zoom);
 
-  const queue = new PQueue({ concurrency: TILE_UPLOAD_CONCURRENCY  });
+  const queue = new PQueue({ concurrency: TILE_UPLOAD_CONCURRENCY });
+  const batchSize = 1000;
+  let batchCount = 0;
 
   const actualStartX = startX ?? xMin;
   const actualStartY = startY ?? yMin;
 
   console.log(
-    `Starting generation for zoom=${zoom} from x=${actualStartX}, y=${actualStartY}`
+    `Starting generation for zoom=${zoom} from x=${actualStartX}, y=${actualStartY} (concurrency=${TILE_UPLOAD_CONCURRENCY})`
   );
 
   for (let x = actualStartX; x <= xMax; x++) {
@@ -59,19 +64,25 @@ export async function generateTiles(
           .toBuffer();
 
         const key = `tiles/${zoom}/${x}/${y}.avif`;
-
         await uploadToS3(key, avifBuffer, "image/avif");
 
-        console.log(`Uploaded tile z${zoom} x${x} y${y} to S3 as AVIF`);
+        console.log(`Uploaded tile z${zoom} x${x} y${y} to S3`);
       });
+
+      batchCount++;
+      if (batchCount >= batchSize) {
+        await queue.onIdle(); // várunk, amíg a batch lefut
+        batchCount = 0;
+        console.log(`Batch of ${batchSize} tiles finished, continuing...`);
+      }
     }
   }
 
   await queue.onIdle();
 
-  if (!isStopped()) {
-    console.log(`Zoom ${zoom} tile generation complete!`);
-  } else {
-    console.log(`Zoom ${zoom} stopped before completion.`);
-  }
+  console.log(
+    !isStopped()
+      ? `Zoom ${zoom} tile generation complete!`
+      : `Zoom ${zoom} stopped before completion.`
+  );
 }
