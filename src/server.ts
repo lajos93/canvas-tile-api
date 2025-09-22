@@ -1,31 +1,22 @@
-import "dotenv/config"; 
-
+import "dotenv/config";
 import express from "express";
-import tilesRouter from "./routes/tiles";
-import generateTilesRouter from "./routes/generateTiles";
-import testUploadRouter from "./routes/testUpload";
-import downloadTiles from "./routes/downloadTiles";
-import lastTileRouter from "./routes/lastTile";
 
+import tilesRouter from "./routes/tiles";
+import generateRouter from "./routes/generate";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.get("/", (req, res) => {
+// health check / root
+app.get("/", (_, res) => {
   res.send("Tile server is running 🚀");
 });
 
-// /tiles 
+// runtime tile rendering
 app.use("/tiles", tilesRouter);
 
-// /admin/
-app.use("/admin", generateTilesRouter);
-app.use("/admin", lastTileRouter);
-
-
-app.use("/admin", testUploadRouter);
-
-app.use("/admin", downloadTiles);
+// batch tile generation + control
+app.use("/generate", generateRouter);
 
 app.listen(PORT, () => {
   console.log(`Tile server running on port ${PORT}`);
