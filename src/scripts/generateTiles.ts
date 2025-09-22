@@ -6,11 +6,8 @@ import { isStopped } from "../utils/stopControl";
 import { uploadToS3 } from "../utils/s3/s3Utils";
 import { TILE_UPLOAD_CONCURRENCY, PAYLOAD_URL } from "../utils/config";
 
-// Magyarország bbox – fix konstans
-const MIN_LAT = 45.7;
-const MAX_LAT = 48.6;
-const MIN_LON = 16.0;
-const MAX_LON = 22.9;
+import { HUNGARY_BOUNDS } from "../utils/geoBounds";
+const { MIN_LAT, MAX_LAT, MIN_LON, MAX_LON } = HUNGARY_BOUNDS;
 
 function lon2tile(lon: number, zoom: number) {
   return Math.floor(((lon + 180) / 360) * 2 ** zoom);

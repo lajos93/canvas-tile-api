@@ -1,11 +1,22 @@
 import { Router } from "express";
 import { generateTiles } from "../scripts/generateTiles";
+import { generateTilesWithWorkers } from "../scripts/generateTiltesWithWorkers";
 import { getLastTileByCoordinates } from "../utils/s3/s3Utils";
-import { stopSignal, resetStopSignal, isStopped } from "../utils/stopControl";
+import { resetStopSignal, stopSignal, isStopped } from "../utils/stopControl";
 
 const router = Router();
 
-// START
+// parseint or undefined
+function parseIntOrUndefined(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const n = parseInt(value, 10);
+  return isNaN(n) ? undefined : n;
+}
+
+/**
+ * classic generator 
+ * 
+ */
 router.get("/start", async (req, res) => {
   try {
     const zoom = parseInt(req.query.zoom as string);
@@ -15,8 +26,8 @@ router.get("/start", async (req, res) => {
 
     resetStopSignal();
 
-    let startX = req.query.startX ? parseInt(req.query.startX as string) : undefined;
-    let startY = req.query.startY ? parseInt(req.query.startY as string) : undefined;
+    let startX = parseIntOrUndefined(req.query.startX as string);
+    let startY = parseIntOrUndefined(req.query.startY as string);
     let resumedFrom: { x: number; y: number } | undefined;
 
     if (startX === undefined || startY === undefined) {
@@ -28,25 +39,68 @@ router.get("/start", async (req, res) => {
       }
     }
 
-    // start the generation in the background
     (async () => {
       try {
         await generateTiles(zoom, startX, startY);
-        console.log(isStopped() ? "Tile process stopped." : "Tile process completed.");
+        console.log(isStopped() ? "⏹️ Classic process stopped." : "✅ Classic process complete.");
       } catch (err) {
-        console.error("Error during tile process:", err);
+        console.error("Error during classic generation:", err);
       }
     })();
 
-    res.json({ status: "started", zoom, startX, startY, resumedFrom });
+    res.json({ status: "started-classic", zoom, startX, startY, resumedFrom });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Error starting tile process" });
+    res.status(500).json({ error: "Error starting classic generation" });
   }
 });
 
-// STOP
-router.get("/stop", (_, res) => {
+/**
+ * Worker based generator
+ * 
+ */
+router.get("/start-workers", async (req, res) => {
+  try {
+    const zoom = parseInt(req.query.zoom as string);
+    if (isNaN(zoom)) {
+      return res.status(400).json({ error: "Invalid zoom level" });
+    }
+
+    resetStopSignal();
+
+    let startX = parseIntOrUndefined(req.query.startX as string);
+    let startY = parseIntOrUndefined(req.query.startY as string);
+    let resumedFrom: { x: number; y: number } | undefined;
+
+    if (startX === undefined || startY === undefined) {
+      const lastTile = await getLastTileByCoordinates(zoom);
+      if (lastTile) {
+        startX = lastTile.x;
+        startY = lastTile.y + 1;
+        resumedFrom = { x: startX, y: startY };
+      }
+    }
+
+    (async () => {
+      try {
+        await generateTilesWithWorkers(zoom, startX, startY);
+        console.log(isStopped() ? "⏹️ Worker process stopped." : "✅ Worker process complete.");
+      } catch (err) {
+        console.error("Error during worker generation:", err);
+      }
+    })();
+
+    res.json({ status: "started-workers", zoom, startX, startY, resumedFrom });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error starting worker generation" });
+  }
+});
+
+/**
+ * ⏹️ Stop jelzés
+ */
+router.get("/stop", (_req, res) => {
   stopSignal();
   res.json({ status: "stop signal sent" });
 });
