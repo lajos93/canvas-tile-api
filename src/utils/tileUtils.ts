@@ -20,22 +20,26 @@ export function tileBBox(x: number, y: number, z: number) {
 // Fetch trees from Payload CMS
 export async function fetchTreesInBBox(
   payloadUrl: string,
-  bbox: ReturnType<typeof tileBBox>
+  bbox: ReturnType<typeof tileBBox>,
+  categoryName?: string
 ): Promise<Tree[]> {
   let allDocs: Tree[] = [];
   let page = 1;
   let hasNext = true;
 
   while (hasNext) {
-    const url =
+    let url =
       `${payloadUrl}/api/trees?limit=5000&page=${page}` +
       `&where[lat][greater_than_equal]=${bbox.lat_bottom}` +
       `&where[lat][less_than_equal]=${bbox.lat_top}` +
       `&where[lon][greater_than_equal]=${bbox.lon_left}` +
       `&where[lon][less_than_equal]=${bbox.lon_right}`;
 
-    const resp = await fetch(url);
+    if (categoryName) {
+      url += `&where[species.category.name][equals]=${encodeURIComponent(categoryName)}`;
+    }
 
+    const resp = await fetch(url);
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(`Payload API error: ${resp.status} - ${text}`);
@@ -80,10 +84,11 @@ export async function renderTileToBuffer(
   z: number,
   x: number,
   y: number,
-  payloadUrl: string
+  payloadUrl: string,
+  categoryName?: string
 ): Promise<Buffer> {
   const bbox = tileBBox(x, y, z);
-  const trees = await fetchTreesInBBox(payloadUrl, bbox);
+  const trees = await fetchTreesInBBox(payloadUrl, bbox, categoryName);
   const canvas = drawTreesOnCanvas(trees, bbox);
   return canvas.toBuffer();
 }

@@ -6,6 +6,8 @@ import { isStopped } from "../utils/stopControl";
 import { uploadToS3 } from "../utils/s3/s3Utils";
 import { TILE_UPLOAD_CONCURRENCY, PAYLOAD_URL } from "../utils/config";
 
+import { resolveCategoryName } from "../utils/speciesUtils";
+
 import { HUNGARY_BOUNDS } from "../utils/geoBounds";
 const { MIN_LAT, MAX_LAT, MIN_LON, MAX_LON } = HUNGARY_BOUNDS;
 
@@ -27,8 +29,15 @@ function lat2tile(lat: number, zoom: number) {
 export async function generateTiles(
   zoom: number,
   startX?: number,
-  startY?: number
-) {
+  startY?: number,
+  categoryName?: string
+)  {
+  const resolvedCategory = await resolveCategoryName(PAYLOAD_URL, categoryName);
+
+   if (categoryName && !resolvedCategory) {
+    throw new Error(`Unknown species category: ${categoryName}`);
+  }
+
   const xMin = lon2tile(MIN_LON, zoom);
   const xMax = lon2tile(MAX_LON, zoom);
   const yMin = lat2tile(MAX_LAT, zoom);
@@ -54,7 +63,7 @@ export async function generateTiles(
       }
 
       queue.add(async () => {
-        const pngBuffer = await renderTileToBuffer(zoom, x, y, PAYLOAD_URL);
+        const pngBuffer = await renderTileToBuffer(zoom, x, y, PAYLOAD_URL, resolvedCategory);
 
         const avifBuffer = await sharp(pngBuffer)
           .avif({ quality: 30 })
