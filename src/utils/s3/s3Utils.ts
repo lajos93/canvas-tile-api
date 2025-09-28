@@ -6,6 +6,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { s3, bucketName } from "./s3Client";
+import { slugify } from "../slugify";
 
 /**
  * Uploat to S3 and returns the file URL.
@@ -70,23 +71,37 @@ export async function listS3Objects(prefix: string): Promise<string[]> {
 /**
  * Last tile info by zoom level (based on S3 keys)
  */
-export async function getLastTileByCoordinates(zoom: number) {
-  const prefix = `tiles/${zoom}/`;
+export async function getLastTileByCoordinates(
+  zoom: number,
+  categoryName?: string
+): Promise<{ x: number; y: number } | null> {
+  const prefix = categoryName
+    ? `tiles/category/${slugify(categoryName)}/${zoom}/`
+    : `tiles/${zoom}/`;
+
   const keys = await listS3Objects(prefix);
+  if (!keys.length) return null;
 
-  let lastTile: { x: number; y: number } | null = null;
+  // Példa key: tiles/category/almafelek/12/345/678.avif
+  // vagy: tiles/12/345/678.avif
+  const coords = keys.map((key) => {
+    const parts = key.split("/");
+    const yPart = parts.pop()!; // pl. "678.avif"
+    const xPart = parts.pop()!; // pl. "345"
+    const zPart = parts.pop()!; // pl. "12"
 
-  for (const key of keys) {
-    const match = key.match(/tiles\/\d+\/(\d+)\/(\d+)\.avif$/);
-    if (!match) continue;
+    const x = parseInt(xPart, 10);
+    const y = parseInt(yPart.replace(/\..+$/, ""), 10); // levágjuk a kiterjesztést
+    const z = parseInt(zPart, 10);
 
-    const x = parseInt(match[1]);
-    const y = parseInt(match[2]);
+    return { x, y, z };
+  });
 
-    if (!lastTile || x > lastTile.x || (x === lastTile.x && y > lastTile.y)) {
-      lastTile = { x, y };
-    }
-  }
+  // csak az adott zoom szint
+  const zoomCoords = coords.filter((c) => c.z === zoom);
+  if (!zoomCoords.length) return null;
 
-  return lastTile;
+  // legnagyobb X, Y koordinátát keressük (mintha sorfolytonosan mennénk)
+  zoomCoords.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  return zoomCoords[zoomCoords.length - 1];
 }

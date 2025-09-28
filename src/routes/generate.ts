@@ -25,20 +25,20 @@ router.get("/start", async (req, res) => {
 
     resetStopSignal();
 
+    const categoryName = req.query.type as string | undefined;
+
     let startX = parseIntOrUndefined(req.query.startX as string);
     let startY = parseIntOrUndefined(req.query.startY as string);
     let resumedFrom: { x: number; y: number } | undefined;
 
     if (startX === undefined || startY === undefined) {
-      const lastTile = await getLastTileByCoordinates(zoom);
+      const lastTile = await getLastTileByCoordinates(zoom, categoryName);
       if (lastTile) {
         startX = lastTile.x;
         startY = lastTile.y + 1;
         resumedFrom = { x: startX, y: startY };
       }
     }
-
-    const categoryName = req.query.type as string | undefined;
 
     (async () => {
       try {
@@ -51,7 +51,14 @@ router.get("/start", async (req, res) => {
       }
     })();
 
-    res.json({ status: "started-classic", zoom, startX, startY, resumedFrom, categoryName });
+    res.json({
+      status: "started-classic",
+      zoom,
+      startX,
+      startY,
+      resumedFrom,
+      categoryName,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error starting classic generation" });
@@ -70,20 +77,20 @@ router.get("/start-workers", async (req, res) => {
 
     resetStopSignal();
 
+    const categoryName = req.query.type as string | undefined;
+
     let startX = parseIntOrUndefined(req.query.startX as string);
     let startY = parseIntOrUndefined(req.query.startY as string);
     let resumedFrom: { x: number; y: number } | undefined;
 
     if (startX === undefined || startY === undefined) {
-      const lastTile = await getLastTileByCoordinates(zoom);
+      const lastTile = await getLastTileByCoordinates(zoom, categoryName);
       if (lastTile) {
         startX = lastTile.x;
         startY = lastTile.y + 1;
         resumedFrom = { x: startX, y: startY };
       }
     }
-
-    const categoryName = req.query.type as string | undefined;
 
     (async () => {
       try {
@@ -96,7 +103,14 @@ router.get("/start-workers", async (req, res) => {
       }
     })();
 
-    res.json({ status: "started-workers", zoom, startX, startY, resumedFrom, categoryName });
+    res.json({
+      status: "started-workers",
+      zoom,
+      startX,
+      startY,
+      resumedFrom,
+      categoryName,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error starting worker generation" });
@@ -104,7 +118,7 @@ router.get("/start-workers", async (req, res) => {
 });
 
 /**
- * ⏹️ Stop jelzés
+ * ⏹️ Stop sign
  */
 router.get("/stop", (_req, res) => {
   stopSignal();
