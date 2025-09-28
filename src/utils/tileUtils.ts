@@ -71,7 +71,8 @@ const iconCache: Record<string, Image> = {};
 // Draw trees on canvas
 export async function drawTreesOnCanvas(
   trees: Tree[],
-  bbox: ReturnType<typeof tileBBox>
+  bbox: ReturnType<typeof tileBBox>,
+  z: number
 ) {
   const tileSize = 256;
   const canvas = createCanvas(tileSize, tileSize);
@@ -83,14 +84,14 @@ export async function drawTreesOnCanvas(
       ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) *
       tileSize;
     const py =
-      ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) * tileSize;
+      ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) *
+      tileSize;
 
     const categoryName = tree.species?.category?.name;
     const iconFile = categoryName ? iconMap[categoryName] : undefined;
 
     if (iconFile) {
       if (!iconCache[iconFile]) {
-        //absolute path to icon file
         const iconPath = path.resolve(
           process.cwd(),
           "src/assets/icons",
@@ -99,10 +100,16 @@ export async function drawTreesOnCanvas(
         iconCache[iconFile] = await loadImage(iconPath);
       }
       const icon = iconCache[iconFile];
-      const size = 16;
+
+      // zoom-függő méret
+      let size = 16;
+      if (z >= 15) {
+        size = 32 + (z - 15) * 8;
+      }
+
       ctx.drawImage(icon, px - size / 2, py - size / 2, size, size);
     } else {
-      // fallback: green dot
+      // fallback: zöld pötty
       ctx.fillStyle = "green";
       ctx.beginPath();
       ctx.arc(px, py, 2, 0, 2 * Math.PI);
@@ -123,6 +130,6 @@ export async function renderTileToBuffer(
 ): Promise<Buffer> {
   const bbox = tileBBox(x, y, z);
   const trees = await fetchTreesInBBox(payloadUrl, bbox, categoryName);
-  const canvas = await drawTreesOnCanvas(trees, bbox);
+  const canvas = await drawTreesOnCanvas(trees, bbox, z);
   return canvas.toBuffer();
 }
