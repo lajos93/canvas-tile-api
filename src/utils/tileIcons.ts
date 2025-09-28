@@ -1,0 +1,16 @@
+export const iconMap: Record<string, string> = {
+  "Almafélék": "apple.png",
+  "Birs": "quince.png",
+  "Cseresznye": "cherry.png",
+  "Dió": "walnut.png",
+  "Elaeagnus": "oleaster.png",
+  "Eperfa": "mulberry.png",
+  "Füge": "fig.png",
+  "Gránátalma": "pomegranate.png",
+  "Körtefélék": "pear.png",
+  "Mandula": "almond.png",
+  "Naspolya": "medlar.png",
+  "Őszibarack": "peach.png",
+  "Sárgabarack": "apricot.png",
+  "Szilva": "plum.png",
+};
