@@ -7,8 +7,10 @@ import { uploadToS3 } from "../utils/s3/s3Utils";
 import { TILE_UPLOAD_CONCURRENCY, PAYLOAD_URL } from "../utils/config";
 
 import { resolveCategoryName } from "../utils/speciesUtils";
+import { slugify } from "../utils/slugify";
 
 import { HUNGARY_BOUNDS } from "../utils/geoBounds";
+
 const { MIN_LAT, MAX_LAT, MIN_LON, MAX_LON } = HUNGARY_BOUNDS;
 
 function lon2tile(lon: number, zoom: number) {
@@ -31,10 +33,10 @@ export async function generateTiles(
   startX?: number,
   startY?: number,
   categoryName?: string
-)  {
+) {
   const resolvedCategory = await resolveCategoryName(PAYLOAD_URL, categoryName);
 
-   if (categoryName && !resolvedCategory) {
+  if (categoryName && !resolvedCategory) {
     throw new Error(`Unknown species category: ${categoryName}`);
   }
 
@@ -63,16 +65,31 @@ export async function generateTiles(
       }
 
       queue.add(async () => {
-        const pngBuffer = await renderTileToBuffer(zoom, x, y, PAYLOAD_URL, resolvedCategory);
+        const pngBuffer = await renderTileToBuffer(
+          zoom,
+          x,
+          y,
+          PAYLOAD_URL,
+          resolvedCategory
+        );
 
         const avifBuffer = await sharp(pngBuffer)
           .avif({ quality: 30 })
           .toBuffer();
 
-        const key = `tiles/${zoom}/${x}/${y}.avif`;
+        const key = resolvedCategory
+          ? `tiles/category/${slugify(resolvedCategory)}/${zoom}/${x}/${y}.avif`
+          : `tiles/${zoom}/${x}/${y}.avif`;
+
+          console.log(key)
+
         await uploadToS3(key, avifBuffer, "image/avif");
 
-        console.log(`Uploaded tile z${zoom} x${x} y${y} to S3`);
+        console.log(
+          `Uploaded tile z${zoom} x${x} y${y} ${
+            resolvedCategory ? `(${resolvedCategory})` : ""
+          } to S3`
+        );
       });
 
       batchCount++;

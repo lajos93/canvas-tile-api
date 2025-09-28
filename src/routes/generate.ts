@@ -6,7 +6,7 @@ import { resetStopSignal, stopSignal, isStopped } from "../utils/stopControl";
 
 const router = Router();
 
-// parseint or undefined
+// parseInt or undefined helper
 function parseIntOrUndefined(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const n = parseInt(value, 10);
@@ -14,8 +14,7 @@ function parseIntOrUndefined(value: string | undefined): number | undefined {
 }
 
 /**
- * classic generator 
- * 
+ * classic generator
  */
 router.get("/start", async (req, res) => {
   try {
@@ -39,16 +38,20 @@ router.get("/start", async (req, res) => {
       }
     }
 
+    const categoryName = req.query.type as string | undefined;
+
     (async () => {
       try {
-        await generateTiles(zoom, startX, startY);
-        console.log(isStopped() ? "⏹️ Classic process stopped." : "✅ Classic process complete.");
+        await generateTiles(zoom, startX, startY, categoryName);
+        console.log(
+          isStopped() ? "⏹️ Classic process stopped." : "✅ Classic process complete."
+        );
       } catch (err) {
         console.error("Error during classic generation:", err);
       }
     })();
 
-    res.json({ status: "started-classic", zoom, startX, startY, resumedFrom });
+    res.json({ status: "started-classic", zoom, startX, startY, resumedFrom, categoryName });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error starting classic generation" });
@@ -57,7 +60,6 @@ router.get("/start", async (req, res) => {
 
 /**
  * Worker based generator
- * 
  */
 router.get("/start-workers", async (req, res) => {
   try {
@@ -81,16 +83,20 @@ router.get("/start-workers", async (req, res) => {
       }
     }
 
+    const categoryName = req.query.type as string | undefined;
+
     (async () => {
       try {
-        await generateTilesWithWorkers(zoom, startX, startY);
-        console.log(isStopped() ? "⏹️ Worker process stopped." : "✅ Worker process complete.");
+        await generateTilesWithWorkers(zoom, startX, startY, categoryName);
+        console.log(
+          isStopped() ? "⏹️ Worker process stopped." : "✅ Worker process complete."
+        );
       } catch (err) {
         console.error("Error during worker generation:", err);
       }
     })();
 
-    res.json({ status: "started-workers", zoom, startX, startY, resumedFrom });
+    res.json({ status: "started-workers", zoom, startX, startY, resumedFrom, categoryName });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Error starting worker generation" });
