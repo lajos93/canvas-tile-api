@@ -19,7 +19,7 @@ function lat2tile(lat: number, zoom: number) {
   const latRad = (lat * Math.PI) / 180;
   return Math.floor(
     ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
-      2 ** zoom
+    2 ** zoom
   );
 }
 
@@ -68,12 +68,13 @@ export async function generateTilesWithWorkers(
 
   const queue = new PQueue({ concurrency: TILE_UPLOAD_CONCURRENCY });
 
+  console.log(`⚙️ Worker queue created (concurrency=${TILE_UPLOAD_CONCURRENCY})`);
+
   const actualStartX = startX ?? xMin;
   const actualStartY = startY ?? yMin;
 
   console.log(
-    `🚀 Starting worker-based generation for zoom=${zoom} from x=${actualStartX}, y=${actualStartY} ${
-      resolvedCategory ? `(category: ${resolvedCategory})` : ""
+    `🚀 Starting worker-based generation for zoom=${zoom} from x=${actualStartX}, y=${actualStartY} ${resolvedCategory ? `(category: ${resolvedCategory})` : ""
     }`
   );
 
