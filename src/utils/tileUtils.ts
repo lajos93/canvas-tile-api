@@ -90,11 +90,16 @@ export async function drawTreesOnCanvas(
 
     if (iconFile) {
       if (!iconCache[iconFile]) {
-        const iconPath = path.resolve(__dirname, "../assets/icons", iconFile);
+        //absolute path to icon file
+        const iconPath = path.resolve(
+          process.cwd(),
+          "src/assets/icons",
+          iconFile
+        );
         iconCache[iconFile] = await loadImage(iconPath);
       }
       const icon = iconCache[iconFile];
-      const size = 16; // icon size in px
+      const size = 16;
       ctx.drawImage(icon, px - size / 2, py - size / 2, size, size);
     } else {
       // fallback: green dot
