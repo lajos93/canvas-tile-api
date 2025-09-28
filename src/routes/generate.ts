@@ -3,6 +3,7 @@ import { generateTiles } from "../scripts/generateTiles";
 import { generateTilesWithWorkers } from "../scripts/generateTiltesWithWorkers";
 import { getLastTileByCoordinates } from "../utils/s3/s3Utils";
 import { resetStopSignal, stopSignal, isStopped } from "../utils/stopControl";
+import { checkCategoryIcon } from "../utils/checkCategoryIcon";
 
 const router = Router();
 
@@ -26,6 +27,13 @@ router.get("/start", async (req, res) => {
     resetStopSignal();
 
     const categoryName = req.query.type as string | undefined;
+
+    if (categoryName) {
+      const { ok, error } = checkCategoryIcon(categoryName);
+      if (!ok) {
+        return res.status(400).json({ error });
+      }
+    }
 
     let startX = parseIntOrUndefined(req.query.startX as string);
     let startY = parseIntOrUndefined(req.query.startY as string);
@@ -78,6 +86,14 @@ router.get("/start-workers", async (req, res) => {
     resetStopSignal();
 
     const categoryName = req.query.type as string | undefined;
+
+    // csak akkor ellenőrzünk ikont, ha van category
+    if (categoryName) {
+      const { ok, error } = checkCategoryIcon(categoryName);
+      if (!ok) {
+        return res.status(400).json({ error });
+      }
+    }
 
     let startX = parseIntOrUndefined(req.query.startX as string);
     let startY = parseIntOrUndefined(req.query.startY as string);
