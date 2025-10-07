@@ -1,6 +1,8 @@
 import sharp from "sharp";
 import PQueue from "p-queue";
 
+import { updateStatusFile } from "../utils/s3/updateStatusFile";
+
 import { renderTileToBuffer } from "../utils/tileUtils";
 import { isStopped } from "../utils/stopControl";
 import { uploadToS3 } from "../utils/s3/s3Utils";
@@ -8,7 +10,6 @@ import { TILE_UPLOAD_CONCURRENCY, PAYLOAD_URL } from "../utils/config";
 
 import { resolveCategoryName } from "../utils/speciesUtils";
 import { slugify } from "../utils/slugify";
-
 import { HUNGARY_BOUNDS } from "../utils/geoBounds";
 
 const { MIN_LAT, MAX_LAT, MIN_LON, MAX_LON } = HUNGARY_BOUNDS;
@@ -26,7 +27,7 @@ function lat2tile(lat: number, zoom: number) {
 }
 
 /**
- * Tile generálás + S3 feltöltés
+ * Tile generálás + S3 feltöltés + status.json frissítés
  */
 export async function generateTiles(
   zoom: number,
@@ -35,10 +36,17 @@ export async function generateTiles(
   categoryName?: string
 ) {
   const resolvedCategory = await resolveCategoryName(PAYLOAD_URL, categoryName);
-
   if (categoryName && !resolvedCategory) {
     throw new Error(`Unknown species category: ${categoryName}`);
   }
+
+  // 🟢 Induláskor status.json létrehozása/frissítése
+  await updateStatusFile({
+    status: "running",
+    startedAt: new Date().toISOString(),
+    category: resolvedCategory,
+    zoom,
+  });
 
   const xMin = lon2tile(MIN_LON, zoom);
   const xMax = lon2tile(MAX_LON, zoom);
@@ -61,6 +69,14 @@ export async function generateTiles(
       if (isStopped()) {
         console.log(`Tile generation STOPPED at x=${x}, y=${y}`);
         await queue.onIdle();
+
+        // ⏹️ Leállítás esetén státusz frissítése
+        await updateStatusFile({
+          status: "stopped",
+          category: resolvedCategory,
+          zoom,
+          finishedAt: new Date().toISOString(),
+        });
         return;
       }
 
@@ -81,8 +97,6 @@ export async function generateTiles(
           ? `tiles/category/${slugify(resolvedCategory)}/${zoom}/${x}/${y}.avif`
           : `tiles/${zoom}/${x}/${y}.avif`;
 
-          console.log(key)
-
         await uploadToS3(key, avifBuffer, "image/avif");
 
         console.log(
@@ -94,18 +108,26 @@ export async function generateTiles(
 
       batchCount++;
       if (batchCount >= batchSize) {
-        await queue.onIdle(); // várunk, amíg a batch lefut
+        await queue.onIdle();
+        console.log(`✅ Batch of ${batchSize} tiles finished.`);
         batchCount = 0;
-        console.log(`Batch of ${batchSize} tiles finished, continuing...`);
       }
     }
   }
 
   await queue.onIdle();
 
+  // ✅ Befejezés után státusz frissítése
+  await updateStatusFile({
+    status: "finished",
+    finishedAt: new Date().toISOString(),
+    category: resolvedCategory,
+    zoom,
+  });
+
   console.log(
     !isStopped()
-      ? `Zoom ${zoom} tile generation complete!`
-      : `Zoom ${zoom} stopped before completion.`
+      ? `✅ Zoom ${zoom} tile generation complete!`
+      : `⏹️ Zoom ${zoom} stopped before completion.`
   );
 }
