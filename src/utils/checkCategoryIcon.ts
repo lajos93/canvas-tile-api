@@ -15,6 +15,7 @@ export function checkCategoryIcon(categoryName: string): { ok: boolean; filePath
   if (!fs.existsSync(absPath)) {
     return { ok: false, error: `Icon file missing for category: ${categoryName}` };
   }
+  
 
   return { ok: true, filePath: absPath };
 }

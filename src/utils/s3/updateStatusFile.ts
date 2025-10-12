@@ -11,23 +11,21 @@ type StatusSchema = {
   startedAt?: string;
   finishedAt?: string;
   lastUpdated?: string;
-  categories?: Record<string, CategoryStatus>;
+  categories?: Record<string, CategoryStatus>; // kulcs = categoryId
 };
 
 /**
  * Frissíti vagy létrehozza a status.json fájlt az S3-ban.
- * - Minden kategóriához tárolja a generált zoom szinteket.
- * - Ha új kategória vagy zoom kerül hozzá, automatikusan bővíti.
+ * - Minden kategória (id) szerint tárolja a generált zoomokat.
  */
 export async function updateStatusFile(update: {
-  category?: string;
+  categoryId?: number;
   zoom?: number;
   status?: string;
   startedAt?: string;
   finishedAt?: string;
 }) {
   const key = "status.json";
-
   let currentStatus: StatusSchema = {};
 
   try {
@@ -41,24 +39,24 @@ export async function updateStatusFile(update: {
   const now = new Date().toISOString();
   if (!currentStatus.categories) currentStatus.categories = {};
 
-  const { category, zoom } = update;
+  const { categoryId, zoom } = update;
 
-  // Ha van kategória és zoom → frissítjük vagy létrehozzuk a kategória bejegyzést
-  if (category && typeof zoom === "number") {
-    if (!currentStatus.categories[category]) {
-      currentStatus.categories[category] = { zooms: [], lastUpdated: now };
+  // 🧠 kategória (id) + zoom frissítése
+  if (categoryId !== undefined && typeof zoom === "number") {
+    const idKey = String(categoryId);
+    if (!currentStatus.categories[idKey]) {
+      currentStatus.categories[idKey] = { zooms: [], lastUpdated: now };
     }
 
-    const categoryEntry = currentStatus.categories[category];
-    if (!categoryEntry.zooms.includes(zoom)) {
-      categoryEntry.zooms.push(zoom);
-      categoryEntry.zooms.sort((a, b) => a - b);
+    const entry = currentStatus.categories[idKey];
+    if (!entry.zooms.includes(zoom)) {
+      entry.zooms.push(zoom);
+      entry.zooms.sort((a, b) => a - b);
     }
 
-    categoryEntry.lastUpdated = now;
+    entry.lastUpdated = now;
   }
 
-  // Metaadatok frissítése
   const newStatus: StatusSchema = {
     ...currentStatus,
     ...update,
@@ -74,5 +72,7 @@ export async function updateStatusFile(update: {
     })
   );
 
-  console.log(`📊 Status updated for ${category || "general"} (zoom=${zoom ?? "n/a"})`);
+  console.log(
+    `📊 Status updated for categoryId=${categoryId ?? "general"} (zoom=${zoom ?? "n/a"})`
+  );
 }

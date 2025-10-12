@@ -4,13 +4,13 @@ import PQueue from "p-queue";
 
 import { isStopped } from "../utils/stopControl";
 import { TILE_UPLOAD_CONCURRENCY, PAYLOAD_URL } from "../utils/config";
-
 import { HUNGARY_BOUNDS } from "../utils/geoBounds";
-import { resolveCategoryName } from "../utils/speciesUtils";
-
 
 const { MIN_LAT, MAX_LAT, MIN_LON, MAX_LON } = HUNGARY_BOUNDS;
 
+/**
+ * koordináta → tile index
+ */
 function lon2tile(lon: number, zoom: number) {
   return Math.floor(((lon + 180) / 360) * 2 ** zoom);
 }
@@ -18,24 +18,23 @@ function lon2tile(lon: number, zoom: number) {
 function lat2tile(lat: number, zoom: number) {
   const latRad = (lat * Math.PI) / 180;
   return Math.floor(
-    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
-    2 ** zoom
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** zoom
   );
 }
 
+/**
+ * Egy tile generálása külön worker threadben
+ */
 function runTileWorker(
   zoom: number,
   x: number,
   y: number,
-  resolvedCategory?: string
+  categoryId?: number
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(
-      path.resolve(__dirname, "../workers/tileWorker.js"),
-      {
-        workerData: { zoom, x, y, resolvedCategory },
-      }
-    );
+    const worker = new Worker(path.resolve(__dirname, "../workers/tileWorker.js"), {
+      workerData: { zoom, x, y, categoryId, payloadUrl: PAYLOAD_URL },
+    });
 
     worker.on("message", (msg) => {
       if (msg.success) resolve(msg.key);
@@ -49,17 +48,17 @@ function runTileWorker(
   });
 }
 
+/**
+ * Több workerrel párhuzamos tile generálás
+ * Csak ott dolgozik, ahol az API szerint van fa.
+ */
 export async function generateTilesWithWorkers(
   zoom: number,
   startX?: number,
   startY?: number,
-  categoryName?: string
+  categoryId?: number
 ) {
-  const resolvedCategory = await resolveCategoryName(PAYLOAD_URL, categoryName);
-
-  if (categoryName && !resolvedCategory) {
-    throw new Error(`Unknown species category: ${categoryName}`);
-  }
+  if (!zoom || isNaN(zoom)) throw new Error("Zoom level is required and must be a number");
 
   const xMin = lon2tile(MIN_LON, zoom);
   const xMax = lon2tile(MAX_LON, zoom);
@@ -74,8 +73,8 @@ export async function generateTilesWithWorkers(
   const actualStartY = startY ?? yMin;
 
   console.log(
-    `🚀 Starting worker-based generation for zoom=${zoom} from x=${actualStartX}, y=${actualStartY} ${resolvedCategory ? `(category: ${resolvedCategory})` : ""
-    }`
+    `🚀 Starting worker-based generation for zoom=${zoom} from x=${actualStartX}, y=${actualStartY}` +
+      (categoryId ? ` (categoryId=${categoryId})` : " (all categories)")
   );
 
   for (let x = actualStartX; x <= xMax; x++) {
@@ -87,8 +86,12 @@ export async function generateTilesWithWorkers(
       }
 
       queue.add(async () => {
-        const key = await runTileWorker(zoom, x, y, resolvedCategory);
-        console.log(`✅ Uploaded tile ${key}`);
+        try {
+          const key = await runTileWorker(zoom, x, y, categoryId);
+          console.log(`✅ Uploaded tile ${key}`);
+        } catch (err) {
+          console.error(`❌ Worker failed at z${zoom} x${x} y${y}:`, err);
+        }
       });
     }
   }

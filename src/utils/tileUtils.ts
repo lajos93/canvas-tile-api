@@ -1,13 +1,13 @@
 import path from "path";
-
 import { createCanvas, loadImage, Image } from "canvas";
-import { iconMap } from "../utils/tileIcons"; //
+import { iconMap } from "../utils/tileIcons";
 
 export interface Tree {
   lat: number;
   lon: number;
   species?: {
     category?: {
+      id: number;
       name: string;
     };
   };
@@ -18,19 +18,19 @@ export function tileBBox(x: number, y: number, z: number) {
   const n = 2 ** z;
   const lon_left = (x / n) * 360 - 180;
   const lon_right = ((x + 1) / n) * 360 - 180;
-  const lat_top =
-    (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
-  const lat_bottom =
-    (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 1)) / n))) * 180) / Math.PI;
-
+  const lat_top = (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
+  const lat_bottom = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 1)) / n))) * 180) / Math.PI;
   return { lon_left, lon_right, lat_top, lat_bottom };
 }
 
-// Fetch trees from Payload CMS
+/**
+ * Fetches trees inside a tile bounding box from the Payload API.
+ * If categoryId is provided, filters by that category.
+ */
 export async function fetchTreesInBBox(
   payloadUrl: string,
   bbox: ReturnType<typeof tileBBox>,
-  categoryName?: string
+  categoryId?: number
 ): Promise<Tree[]> {
   let allDocs: Tree[] = [];
   let page = 1;
@@ -44,10 +44,8 @@ export async function fetchTreesInBBox(
       `&where[lon][greater_than_equal]=${bbox.lon_left}` +
       `&where[lon][less_than_equal]=${bbox.lon_right}`;
 
-    if (categoryName) {
-      url += `&where[species.category.name][equals]=${encodeURIComponent(
-        categoryName
-      )}`;
+    if (categoryId) {
+      url += `&where[species.category.id][equals]=${categoryId}`;
     }
 
     const resp = await fetch(url);
@@ -68,7 +66,7 @@ export async function fetchTreesInBBox(
 // cache for loaded icons
 const iconCache: Record<string, Image> = {};
 
-// Draw trees on canvas
+// draw trees on a canvas
 export async function drawTreesOnCanvas(
   trees: Tree[],
   bbox: ReturnType<typeof tileBBox>,
@@ -80,36 +78,24 @@ export async function drawTreesOnCanvas(
   ctx.clearRect(0, 0, tileSize, tileSize);
 
   for (const tree of trees) {
-    const px =
-      ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) *
-      tileSize;
-    const py =
-      ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) *
-      tileSize;
+    const px = ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * tileSize;
+    const py = ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) * tileSize;
 
-    const categoryName = tree.species?.category?.name;
-    const iconFile = categoryName ? iconMap[categoryName] : undefined;
+    const categoryId = tree.species?.category?.id;
+    const iconFile = categoryId ? iconMap[String(categoryId)] : undefined;
 
     if (iconFile) {
       if (!iconCache[iconFile]) {
-        const iconPath = path.resolve(
-          process.cwd(),
-          "src/assets/icons",
-          iconFile
-        );
+        const iconPath = path.resolve(process.cwd(), "src/assets/icons", iconFile);
         iconCache[iconFile] = await loadImage(iconPath);
       }
       const icon = iconCache[iconFile];
 
-      // zoom-függő méret
       let size = 16;
-      if (z >= 15) {
-        size = 32 + (z - 15) * 8;
-      }
+      if (z >= 15) size = 32 + (z - 15) * 8;
 
       ctx.drawImage(icon, px - size / 2, py - size / 2, size, size);
     } else {
-      // fallback: zöld pötty
       ctx.fillStyle = "green";
       ctx.beginPath();
       ctx.arc(px, py, 2, 0, 2 * Math.PI);
@@ -120,16 +106,16 @@ export async function drawTreesOnCanvas(
   return canvas;
 }
 
-// High-level: render full tile buffer
+// high-level: render tile buffer
 export async function renderTileToBuffer(
   z: number,
   x: number,
   y: number,
   payloadUrl: string,
-  categoryName?: string
+  categoryId?: number
 ): Promise<Buffer> {
   const bbox = tileBBox(x, y, z);
-  const trees = await fetchTreesInBBox(payloadUrl, bbox, categoryName);
+  const trees = await fetchTreesInBBox(payloadUrl, bbox, categoryId);
   const canvas = await drawTreesOnCanvas(trees, bbox, z);
   return canvas.toBuffer();
 }
