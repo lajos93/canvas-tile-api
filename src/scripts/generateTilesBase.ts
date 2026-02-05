@@ -30,7 +30,7 @@ export async function generateTilesBase(
     queue.add(async () => {
       try {
         const buffer = await renderTileToBuffer(zoom, x, y, PAYLOAD_URL, categoryId);
-        const avifBuffer = await sharp(buffer).avif({ quality: 30 }).toBuffer();
+        const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         const key = `tiles/category/${folderName}/${zoom}/${x}/${y}.avif`;
 
         await uploadToS3(key, avifBuffer, "image/avif");

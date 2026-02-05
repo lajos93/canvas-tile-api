@@ -12,7 +12,8 @@ async function processTile({ zoom, x, y }: { zoom: number; x: number; y: number 
   console.log(`👷 Worker: rendered tile z${zoom} x${x} y${y}`);
 
   const avifBuffer = await sharp(pngBuffer)
-    .avif({ quality: 30 })
+    .resize(256, 256)
+    .avif({ quality: 72 })
     .toBuffer();
 
   console.log(`👷 Worker: converted tile z${zoom} x${x} y${y} to AVIF`);

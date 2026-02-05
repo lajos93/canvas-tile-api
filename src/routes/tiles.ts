@@ -1,5 +1,6 @@
 import { Router } from "express";
 import archiver from "archiver";
+import sharp from "sharp";
 import { renderTileToBuffer } from "../utils/tileUtils";
 import {
   getLastTileByCoordinates,
@@ -22,8 +23,9 @@ router.get("/:z/:x/:y.png", async (req, res) => {
     }
 
     const buffer = await renderTileToBuffer(Number(z), Number(x), Number(y), payloadUrl);
+    const png256 = await sharp(buffer).resize(256, 256).png().toBuffer();
     res.setHeader("Content-Type", "image/png");
-    res.send(buffer);
+    res.send(png256);
   } catch (err) {
     console.error("Error rendering tile:", err);
     res.status(500).send("Internal Server Error");
@@ -55,7 +57,8 @@ router.get("/test-upload", async (_req, res) => {
   try {
     const z = 6, x = 34, y = 42;
     const buffer = await renderTileToBuffer(z, x, y, payloadUrl);
-    const url = await uploadToS3(`tiles/${z}/${x}/${y}.png`, buffer, "image/png");
+    const png256 = await sharp(buffer).resize(256, 256).png().toBuffer();
+    const url = await uploadToS3(`tiles/${z}/${x}/${y}.png`, png256, "image/png");
 
     res.json({ uploaded: url });
   } catch (err) {
