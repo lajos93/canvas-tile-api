@@ -42,5 +42,5 @@ app.use("/species", speciesRouter);
 app.use("/status", statusRouter);
 
 app.listen(PORT, () => {
-  console.log(`Tile server running on port ${PORT}`);
+  console.log(`[server] canvas-tile-api started on port ${PORT}`);
 });

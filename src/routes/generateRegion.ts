@@ -6,6 +6,8 @@ import { uploadToS3 } from "../utils/s3/s3Utils";
 import { PAYLOAD_URL } from "../utils/config";
 import { lat2tile, lon2tile } from "../utils/geoBounds";
 import { TILE_UPLOAD_CONCURRENCY } from "../utils/config";
+import { getCategoryNameById } from "../utils/getCategoryNameById";
+import { slugify } from "../utils/slugify";
 
 const router = Router();
 
@@ -19,19 +21,21 @@ const BUDAPEST_BBOX = {
   lonMax: 19.25,
 };
 
-/** POST body: generate default tiles for a region. */
+/** POST body: generate tiles for a region (optionally filtered by category). */
 interface GenerateRegionBody {
   latMin: number;
   latMax: number;
   lonMin: number;
   lonMax: number;
   zoomLevels?: number[];
+  categoryId?: number;
 }
 
 /**
  * POST /generate-region
- * Body: { latMin, latMax, lonMin, lonMax, zoomLevels? }
- * Generates default tiles (all trees) for every tile that intersects the bbox, for each zoom level.
+ * Body: { latMin, latMax, lonMin, lonMax, zoomLevels?, categoryId? }
+ * Generates tiles for every tile that intersects the bbox, for each zoom level.
+ * If categoryId is provided, generates category-filtered tiles.
  * Default zoomLevels: 7–15.
  */
 router.post("/", async (req: Request, res: Response) => {
@@ -43,6 +47,7 @@ router.post("/", async (req: Request, res: Response) => {
       lonMin = BUDAPEST_BBOX.lonMin,
       lonMax = BUDAPEST_BBOX.lonMax,
       zoomLevels = BUDAPEST_ZOOM_LEVELS,
+      categoryId,
     } = body;
 
     if (
@@ -60,6 +65,20 @@ router.post("/", async (req: Request, res: Response) => {
 
     if (!PAYLOAD_URL) {
       return res.status(500).json({ error: "PAYLOAD_URL environment variable not set" });
+    }
+
+    // Validate categoryId if provided
+    let categoryName: string | undefined;
+    let categorySlug: string | undefined;
+    if (categoryId !== undefined) {
+      if (typeof categoryId !== "number") {
+        return res.status(400).json({ error: "Invalid categoryId: must be a number" });
+      }
+      categoryName = await getCategoryNameById(categoryId);
+      if (!categoryName) {
+        return res.status(400).json({ error: `Unknown categoryId: ${categoryId}` });
+      }
+      categorySlug = slugify(categoryName);
     }
 
     const levels = Array.isArray(zoomLevels)
@@ -85,6 +104,8 @@ router.post("/", async (req: Request, res: Response) => {
       totalTiles: allTiles.length,
       zoomLevels: levels,
       bbox: { latMin, latMax, lonMin, lonMax },
+      categoryId: categoryId ?? null,
+      categorySlug: categorySlug ?? null,
     });
 
     const queue = new PQueue({ concurrency: TILE_UPLOAD_CONCURRENCY });
@@ -94,18 +115,30 @@ router.post("/", async (req: Request, res: Response) => {
       for (const { z, x, y } of allTiles) {
         queue.add(async () => {
           try {
-            const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined);
+            const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId);
             const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
-            await uploadToS3(`tiles/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
+            
+            // Upload to category path if categoryId provided, otherwise default path
+            const s3Key = categoryId !== undefined && categorySlug
+              ? `tiles/category/${categorySlug}/${z}/${x}/${y}.avif`
+              : `tiles/${z}/${x}/${y}.avif`;
+            
+            await uploadToS3(s3Key, avifBuffer, "image/avif");
             count++;
-            if (count % 50 === 0) console.log(`[generate-region] ${count}/${allTiles.length} tiles`);
+            if (count % 50 === 0) {
+              console.log(
+                `[generate-region] ${count}/${allTiles.length} tiles${categoryId ? ` (categoryId=${categoryId})` : ""}`
+              );
+            }
           } catch (err) {
             console.error(`[generate-region] Tile z${z} x${x} y${y} failed:`, err);
           }
         });
       }
       await queue.onIdle();
-      console.log(`[generate-region] Done. Uploaded ${count} tiles.`);
+      console.log(
+        `[generate-region] Done. Uploaded ${count} tiles.${categoryId ? ` Category: ${categoryName} (id=${categoryId})` : ""}`
+      );
     })();
   } catch (err) {
     console.error("[generate-region]", err);
