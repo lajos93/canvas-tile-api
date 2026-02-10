@@ -15,9 +15,9 @@ interface TreeDoc {
   species?: number | { id: number; category?: number | { id: number; name?: string } };
 }
 
-/** POST body: called by app after adding a new tree */
+/** POST body: called by app after adding a new tree or after deleting one (no treeId) */
 interface RegenerateBody {
-  treeId: number;
+  treeId?: number;
   lat: number;
   lon: number;
 }
@@ -54,7 +54,6 @@ router.post("/", async (req: Request, res: Response) => {
     const { treeId, lat, lon } = body;
 
     if (
-      typeof treeId !== "number" ||
       typeof lat !== "number" ||
       typeof lon !== "number" ||
       lat < -90 ||
@@ -63,7 +62,7 @@ router.post("/", async (req: Request, res: Response) => {
       lon > 180
     ) {
       return res.status(400).json({
-        error: "Invalid body: treeId (number), lat (-90..90), lon (-180..180) required",
+        error: "Invalid body: lat (-90..90), lon (-180..180) required; treeId optional",
       });
     }
 
@@ -71,7 +70,8 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "PAYLOAD_URL environment variable not set" });
     }
 
-    const categoryId = await fetchTreeCategoryId(treeId);
+    const categoryId =
+      typeof treeId === "number" ? await fetchTreeCategoryId(treeId) : undefined;
     const zoomLevels = parseZoomLevels();
 
     const tiles: { z: number; x: number; y: number }[] = [];
@@ -95,8 +95,8 @@ router.post("/", async (req: Request, res: Response) => {
         console.error(`[regenerate-tiles] Default tile z${z} x${x} y${y} failed:`, err);
       }
 
-      // 2) Category tile (if tree has a category) → tiles/category/{slug}/{z}/{x}/{y}.avif
-      if (categoryId != null) {
+      // 2) Category tile (if treeId was provided and tree has a category) → tiles/category/{slug}/{z}/{x}/{y}.avif
+      if (categoryId != null && typeof treeId === "number") {
         try {
           const categoryName = await getCategoryNameById(categoryId);
           if (categoryName) {

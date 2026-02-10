@@ -18,5 +18,11 @@ export function lat2tile(lat: number, zoom: number): number {
   );
 }
 
-/** Zoom levels used when regenerating tiles for a new point (e.g. after add-tree) */
-export const REGENERATE_ZOOM_LEVELS = [7, 8, 9, 10, 11, 12, 13, 14, 15];
+/**
+ * Zoom levels used when regenerating tiles for a specific point
+ * (e.g. after add-tree or delete-tree).
+ *
+ * These are aligned with the manual append-icon workflow, which focuses
+ * on the more detailed, interactive zooms.
+ */
+export const REGENERATE_ZOOM_LEVELS = [13, 14, 15, 16];

@@ -8,11 +8,13 @@ import generateTileRouter from "./routes/generateTile";
 import generateRegionRouter from "./routes/generateRegion";
 import speciesRouter from "./routes/species";
 import statusRouter from "./routes/status";
+import appendIconRouter from "./routes/appendIcon";
+import addTreeWorkflowRouter from "./routes/addTreeWorkflow";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// hogy a PUT /status működjön JSON body-val
+// Allow PUT /status to accept JSON body
 app.use(express.json());
 
 // health check / root
@@ -29,6 +31,12 @@ app.use("/generate", generateRouter);
 // webhook: regenerate tiles for a new tree (POST body: { treeId, lat, lon })
 app.use("/regenerate-tiles", regenerateTilesRouter);
 
+// targeted refresh around a point / zoom selection (used by "Append" in the app)
+app.use("/append-icon", appendIconRouter);
+
+// orchestrated DB insert + append-icon workflow for new trees
+app.use("/add-tree-workflow", addTreeWorkflowRouter);
+
 // manual: generate one tile per zoom 10–15 for a point (POST body: { lat, lon, categoryId })
 app.use("/generate-tile", generateTileRouter);
 
@@ -38,7 +46,7 @@ app.use("/generate-region", generateRegionRouter);
 // species categories
 app.use("/species", speciesRouter);
 
-// 🩺 status.json lekérés és módosítás (GET + PUT)
+// status.json read/update (GET + PUT)
 app.use("/status", statusRouter);
 
 app.listen(PORT, () => {
