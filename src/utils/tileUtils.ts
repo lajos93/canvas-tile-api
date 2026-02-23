@@ -73,7 +73,7 @@ async function fetchJsonWithRetry(url: string, maxRetries: number = 3): Promise<
         `[tileUtils] fetchJsonWithRetry attempt ${attempt}/${maxRetries} failed for ${url}: ${msg}`
       );
       if (attempt === maxRetries) break;
-      // Egyszerű lineáris backoff, hogy kíméljük az API-t
+      // Simple linear backoff to avoid hammering the API
       await new Promise((r) => setTimeout(r, 300 * attempt));
     }
   }
@@ -211,12 +211,11 @@ export async function drawTreesOnCanvas(
     const half = clusterIconSize / 2;
 
     for (const cluster of clusters) {
-      // Icon alap pozíciója a klaszter középpontja körül:
+      // Icon position centered on cluster
       const rawDrawX = cluster.cx - half;
       const rawDrawY = cluster.cy - half;
-      // Clamp csak a *nagy* (super-)tile canvas szélére, de egy kis margóval,
-      // hogy a szuper-tile szélein se legyen levágás (az ikon teljesen látszódjon).
-      const edgeMargin = clusterIconSize * 0.5; // 50% margó a nagy canvas szélétől
+      // Clamp to the (super-)tile canvas edge with a small margin so icons are not cut off at tile borders.
+      const edgeMargin = clusterIconSize * 0.5;
       const drawX = Math.max(
         edgeMargin,
         Math.min(tileSize - clusterIconSize - edgeMargin, rawDrawX)
@@ -251,8 +250,7 @@ export async function drawTreesOnCanvas(
       if (cluster.count > 1) {
         const badgeR = 14;
 
-        // Alap badge pozíció a klaszterhez képest – nem clampeljük a kisebb tile-okra,
-        // a z=9-es super-tile esetén a nagy canvas koordinátái döntenek.
+        // Badge position relative to cluster; for super-tile the large canvas coordinates are used.
         const badgeX = drawX + clusterIconSize - 4;
         const badgeY = drawY + 4;
         ctx.fillStyle = "rgba(255,255,255,0.95)";
@@ -284,7 +282,7 @@ export async function drawTreesOnCanvas(
 
     for (const cluster of clusters) {
       if (cluster.count >= CLUSTER_ZOOM15_DENSE_THRESHOLD && cluster.trees) {
-        // Ugyanaz az elv: clamp csak a nagy canvasra, kis margóval a szélektől.
+        // Same principle: clamp to the large canvas with a small edge margin.
         const rawDrawX = cluster.cx - halfIcon;
         const rawDrawY = cluster.cy - halfIcon;
         const edgeMargin = clusterIconSize * 0.5;
@@ -403,24 +401,29 @@ export async function drawTreesOnCanvas(
 }
 
 // high-level: render tile buffer
+// useSuperTile: when true, render 10×10 block and crop (smoother clusters across edges); when false, render single tile only (faster).
 export async function renderTileToBuffer(
   z: number,
   x: number,
   y: number,
   payloadUrl: string,
-  categoryId?: number
+  categoryId?: number,
+  useSuperTile: boolean = false
 ): Promise<Buffer> {
-  // Általános megoldás: minden zoom szinten egy nagyobb "super-tile" blokkot renderelünk
-  // (pl. 3×3 tile), majd abból vágjuk ki az aktuális tile képét.
-  // Így a klaszter buborékok és számok folytatódnak a szomszédos tile-okon is.
+  if (!useSuperTile) {
+    // Single-tile: fetch and render only this tile's bbox (faster, no cross-tile clustering).
+    const bbox = tileBBox(x, y, z);
+    const trees = await fetchTreesInBBox(payloadUrl, bbox, categoryId);
+    const canvas = await drawTreesOnCanvas(trees, bbox, z, RENDER_SIZE);
+    return canvas.toBuffer();
+  }
 
-  const BLOCK_SIZE = 10; // 10×10 tiles per super-tile (még nagyobb kontextus, ugyanúgy 1 tile-t vágunk ki a végén)
+  // Super-tile: render a larger block then crop to the requested tile so cluster bubbles and counts continue across neighbouring tiles.
+  const BLOCK_SIZE = 10; // 10×10 tiles per super-tile
 
-  // Super-tile origin (top-left tile index)
   const blockX = Math.floor(x / BLOCK_SIZE) * BLOCK_SIZE;
   const blockY = Math.floor(y / BLOCK_SIZE) * BLOCK_SIZE;
 
-  // Super-tile bbox: union of the BLOCK_SIZE×BLOCK_SIZE tiles
   const topLeft = tileBBox(blockX, blockY, z);
   const bottomRight = tileBBox(blockX + BLOCK_SIZE - 1, blockY + BLOCK_SIZE - 1, z);
   const blockBBox = {
@@ -430,7 +433,6 @@ export async function renderTileToBuffer(
     lat_bottom: bottomRight.lat_bottom,
   };
 
-  // Debug visszajelzés: csak a super-tile bal felső tile-nál logolunk, hogy ne legyen túl zajos.
   if (x === blockX && y === blockY) {
     console.log(
       `[super-tile] start z${z} blockX=${blockX}..${
@@ -441,20 +443,14 @@ export async function renderTileToBuffer(
     );
   }
 
-  // Fetch trees for the whole super-tile
   const trees = await fetchTreesInBBox(payloadUrl, blockBBox, categoryId);
-
-  // Render one big canvas for the whole super-tile
   const blockRenderSize = RENDER_SIZE * BLOCK_SIZE;
   const bigCanvas = await drawTreesOnCanvas(trees, blockBBox, z, blockRenderSize);
 
-  // Cut out just this tile's 512×512 region
   const tileCanvas = createCanvas(RENDER_SIZE, RENDER_SIZE);
   const ctx = tileCanvas.getContext("2d");
-
   const offsetX = (x - blockX) * RENDER_SIZE;
   const offsetY = (y - blockY) * RENDER_SIZE;
-
   ctx.drawImage(
     bigCanvas,
     offsetX,

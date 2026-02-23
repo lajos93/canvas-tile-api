@@ -23,7 +23,7 @@ router.get("/", async (_req, res) => {
 });
 
 /**
- * ✏️ PUT /status – status.json kézi módosítása
+ * PUT /status – manually update status.json.
  * Body: { key1: "value", key2: "value" }
  */
 function customMerge(objValue: any, srcValue: any) {

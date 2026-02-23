@@ -9,7 +9,7 @@ import { HUNGARY_BOUNDS } from "../utils/geoBounds";
 const { MIN_LAT, MAX_LAT, MIN_LON, MAX_LON } = HUNGARY_BOUNDS;
 
 /**
- * koordináta → tile index
+ * Coordinate → tile index.
  */
 function lon2tile(lon: number, zoom: number) {
   return Math.floor(((lon + 180) / 360) * 2 ** zoom);
@@ -23,7 +23,7 @@ function lat2tile(lat: number, zoom: number) {
 }
 
 /**
- * Egy tile generálása külön worker threadben
+ * Generate one tile in a separate worker thread.
  */
 function runTileWorker(
   zoom: number,
@@ -49,8 +49,8 @@ function runTileWorker(
 }
 
 /**
- * Több workerrel párhuzamos tile generálás
- * Csak ott dolgozik, ahol az API szerint van fa.
+ * Parallel tile generation with multiple workers.
+ * Only processes tiles where the API reports trees.
  */
 export async function generateTilesWithWorkers(
   zoom: number,

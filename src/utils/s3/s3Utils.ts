@@ -9,7 +9,7 @@ import { s3, bucketName } from "./s3Client";
 import { slugify } from "../slugify";
 
 /**
- * Uploat to S3 and returns the file URL.
+ * Upload to S3 and returns the file URL.
  */
 export async function uploadToS3(
   key: string,
@@ -82,26 +82,26 @@ export async function getLastTileByCoordinates(
   const keys = await listS3Objects(prefix);
   if (!keys.length) return null;
 
-  // Példa key: tiles/category/almafelek/12/345/678.avif
+  // Example key: tiles/category/almafelek/12/345/678.avif
   // vagy: tiles/12/345/678.avif
   const coords = keys.map((key) => {
     const parts = key.split("/");
-    const yPart = parts.pop()!; // pl. "678.avif"
-    const xPart = parts.pop()!; // pl. "345"
-    const zPart = parts.pop()!; // pl. "12"
+    const yPart = parts.pop()!; // e.g. "678.avif"
+    const xPart = parts.pop()!; // e.g. "345"
+    const zPart = parts.pop()!; // e.g. "12"
 
     const x = parseInt(xPart, 10);
-    const y = parseInt(yPart.replace(/\..+$/, ""), 10); // levágjuk a kiterjesztést
+    const y = parseInt(yPart.replace(/\..+$/, ""), 10); // strip file extension
     const z = parseInt(zPart, 10);
 
     return { x, y, z };
   });
 
-  // csak az adott zoom szint
+  // Only the given zoom level
   const zoomCoords = coords.filter((c) => c.z === zoom);
   if (!zoomCoords.length) return null;
 
-  // legnagyobb X, Y koordinátát keressük (mintha sorfolytonosan mennénk)
+  // Find the largest X, Y (row-major order)
   zoomCoords.sort((a, b) => (a.x - b.x) || (a.y - b.y));
   return zoomCoords[zoomCoords.length - 1];
 }

@@ -1,5 +1,5 @@
 /**
- * API-alapú ellenőrzés, hogy van-e fa az adott tile-ban.
+ * API-based check whether the given tile contains any trees.
  */
 export async function hasTreesInTileViaAPI(
   zoom: number,
