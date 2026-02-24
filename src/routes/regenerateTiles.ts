@@ -24,6 +24,8 @@ interface RegenerateBody {
   zoomLevels?: number[];
   /** When true, render 5×5 super-tile and crop center (icons at edges not cut off) */
   superTile?: boolean;
+  /** When set, also regenerate tiles/category/{slug}/ for this category (e.g. from admin filter or target) */
+  categoryId?: number;
 }
 
 function parseZoomLevels(): number[] {
@@ -55,13 +57,17 @@ async function fetchTreeCategoryId(treeId: number): Promise<number | undefined> 
 router.post("/", async (req: Request, res: Response) => {
   try {
     const body = req.body as RegenerateBody;
-    console.log("[regenerate-tiles] request body:", {
-      treeId: body.treeId,
-      lat: body.lat,
-      lon: body.lon,
-      zoomLevels: body.zoomLevels,
-      superTile: body.superTile,
-    });
+    console.log(
+      "[regenerate-tiles] request body:",
+      JSON.stringify({
+        treeId: body.treeId,
+        lat: body.lat,
+        lon: body.lon,
+        zoomLevels: body.zoomLevels,
+        superTile: body.superTile,
+        categoryId: body.categoryId,
+      })
+    );
     const { treeId, lat, lon } = body;
     const useSuperTile = body.superTile === true;
 
@@ -82,8 +88,19 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "PAYLOAD_URL environment variable not set" });
     }
 
+    const rawCat = body.categoryId;
+    const categoryIdFromBody =
+      typeof rawCat === "number" && !Number.isNaN(rawCat)
+        ? rawCat
+        : typeof rawCat === "string" && rawCat !== ""
+          ? Number(rawCat)
+          : undefined;
     const categoryId =
-      typeof treeId === "number" ? await fetchTreeCategoryId(treeId) : undefined;
+      typeof categoryIdFromBody === "number" && !Number.isNaN(categoryIdFromBody)
+        ? categoryIdFromBody
+        : typeof treeId === "number"
+          ? await fetchTreeCategoryId(treeId)
+          : undefined;
     const zoomLevels =
       Array.isArray(body.zoomLevels) && body.zoomLevels.length > 0
         ? body.zoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 15)
@@ -112,8 +129,8 @@ router.post("/", async (req: Request, res: Response) => {
         console.error(`[regenerate-tiles] Default tile z${z} x${x} y${y} failed:`, err);
       }
 
-      // 2) Category tile (if treeId was provided and tree has a category) → tiles/category/{slug}/{z}/{x}/{y}.avif
-      if (categoryId != null && typeof treeId === "number") {
+      // 2) Category tile (when categoryId from body or from treeId) → tiles/category/{slug}/{z}/{x}/{y}.avif
+      if (categoryId != null) {
         try {
           const categoryName = await getCategoryNameById(categoryId);
           if (categoryName) {

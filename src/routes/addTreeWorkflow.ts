@@ -10,6 +10,8 @@ interface AddTreeWorkflowBody {
   lon: number;
   speciesId: number;
   county?: string;
+  /** Category of the species; when set, append-icon updates both default and category tiles */
+  categoryId?: number;
 }
 
 interface PayloadTreeDoc {
@@ -32,7 +34,7 @@ router.post("/", async (req: Request, res: Response) => {
   const startedAt = new Date().toISOString();
 
   const body = req.body as AddTreeWorkflowBody;
-  const { lat, lon, speciesId, county } = body;
+  const { lat, lon, speciesId, county, categoryId: bodyCategoryId } = body;
 
   if (
     typeof lat !== "number" ||
@@ -101,22 +103,18 @@ router.post("/", async (req: Request, res: Response) => {
     phases.dbInsert.ok = true;
     phases.dbInsert.treeId = created.id ?? null;
 
-    // Try to derive categoryId from response (best effort)
-    let categoryId: number | undefined;
-    const speciesField = created.species;
-    if (typeof speciesField === "number") {
-      // We don't have category info in this shape
-      categoryId = undefined;
-    } else if (speciesField && typeof speciesField === "object") {
-      const cat = speciesField.category;
-      if (typeof cat === "number") {
-        categoryId = cat;
-      } else if (cat && typeof cat === "object" && typeof cat.id === "number") {
-        categoryId = cat.id;
+    // Category for append-icon: prefer body (from frontend), else derive from Payload response
+    let categoryId: number | undefined = typeof bodyCategoryId === "number" ? bodyCategoryId : undefined;
+    if (categoryId == null) {
+      const speciesField = created.species;
+      if (typeof speciesField === "object" && speciesField != null) {
+        const cat = speciesField.category;
+        if (typeof cat === "number") categoryId = cat;
+        else if (cat && typeof cat === "object" && typeof cat.id === "number") categoryId = cat.id;
       }
     }
 
-    // Phase 2: append icon on tiles (no full regenerate, just our append-icon logic)
+    // Phase 2: append icon on tiles (default + category tile when categoryId is set)
     try {
       const appendResult = await appendIconForPoint({
         lat,
