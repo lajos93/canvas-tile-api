@@ -41,6 +41,13 @@ interface GenerateTileDefaultBody {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const body = req.body as GenerateTileBody;
+    console.log("[generate-tile] request body:", {
+      lat: body.lat,
+      lon: body.lon,
+      categoryId: body.categoryId,
+      zoomLevels: body.zoomLevels,
+      superTile: body.superTile,
+    });
     const { lat, lon, categoryId, zoomLevels: bodyZoomLevels, superTile } = body;
     const zoomLevels =
       Array.isArray(bodyZoomLevels) && bodyZoomLevels.length > 0
@@ -99,6 +106,9 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
+    console.log(
+      `[generate-tile] success: ${count} tiles, zoomLevels: [${zoomLevels.join(", ")}], superTile: ${useSuperTile}, categorySlug: ${slug}`
+    );
     res.json({
       ok: true,
       tilesRegenerated: count,
@@ -123,6 +133,12 @@ router.post("/", async (req: Request, res: Response) => {
 router.post("/default", async (req: Request, res: Response) => {
   try {
     const body = req.body as GenerateTileDefaultBody;
+    console.log("[generate-tile/default] request body:", {
+      lat: body.lat,
+      lon: body.lon,
+      zoomLevels: body.zoomLevels,
+      superTile: body.superTile,
+    });
     const { lat, lon, zoomLevels: bodyZoomLevels, superTile } = body;
     const zoomLevels =
       Array.isArray(bodyZoomLevels) && bodyZoomLevels.length > 0
@@ -163,6 +179,9 @@ router.post("/default", async (req: Request, res: Response) => {
       }
     }
 
+    console.log(
+      `[generate-tile/default] success: ${count} tiles, zoomLevels: [${zoomLevels.join(", ")}], superTile: ${useSuperTile}`
+    );
     res.json({
       ok: true,
       tilesRegenerated: count,

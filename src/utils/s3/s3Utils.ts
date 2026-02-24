@@ -41,6 +41,24 @@ export async function getS3ObjectStream(key: string): Promise<Readable | null> {
 }
 
 /**
+ * Get S3 object as Buffer by key. Returns null if the object does not exist.
+ */
+export async function getS3ObjectBuffer(key: string): Promise<Buffer | null> {
+  try {
+    const stream = await getS3ObjectStream(key);
+    if (!stream) return null;
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  } catch (err: any) {
+    if (err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404) return null;
+    throw err;
+  }
+}
+
+/**
  * Listing all S3 object keys with the given prefix.
  */
 export async function listS3Objects(prefix: string): Promise<string[]> {
@@ -82,8 +100,7 @@ export async function getLastTileByCoordinates(
   const keys = await listS3Objects(prefix);
   if (!keys.length) return null;
 
-  // Example key: tiles/category/almafelek/12/345/678.avif
-  // vagy: tiles/12/345/678.avif
+  // Example key: tiles/category/almafelek/12/345/678.avif or tiles/12/345/678.avif
   const coords = keys.map((key) => {
     const parts = key.split("/");
     const yPart = parts.pop()!; // e.g. "678.avif"

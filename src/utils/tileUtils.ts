@@ -211,19 +211,9 @@ export async function drawTreesOnCanvas(
     const half = clusterIconSize / 2;
 
     for (const cluster of clusters) {
-      // Icon position centered on cluster
-      const rawDrawX = cluster.cx - half;
-      const rawDrawY = cluster.cy - half;
-      // Clamp to the (super-)tile canvas edge with a small margin so icons are not cut off at tile borders.
-      const edgeMargin = clusterIconSize * 0.5;
-      const drawX = Math.max(
-        edgeMargin,
-        Math.min(tileSize - clusterIconSize - edgeMargin, rawDrawX)
-      );
-      const drawY = Math.max(
-        edgeMargin,
-        Math.min(tileSize - clusterIconSize - edgeMargin, rawDrawY)
-      );
+      // Icon position centered on cluster (no clamp – true position so tile aligns with dynamic overlay)
+      const drawX = cluster.cx - half;
+      const drawY = cluster.cy - half;
 
       if (cluster.categoryId != null) {
         const iconFile = iconMap[String(cluster.categoryId)];
@@ -282,18 +272,8 @@ export async function drawTreesOnCanvas(
 
     for (const cluster of clusters) {
       if (cluster.count >= CLUSTER_ZOOM15_DENSE_THRESHOLD && cluster.trees) {
-        // Same principle: clamp to the large canvas with a small edge margin.
-        const rawDrawX = cluster.cx - halfIcon;
-        const rawDrawY = cluster.cy - halfIcon;
-        const edgeMargin = clusterIconSize * 0.5;
-        const drawX = Math.max(
-          edgeMargin,
-          Math.min(tileSize - clusterIconSize - edgeMargin, rawDrawX)
-        );
-        const drawY = Math.max(
-          edgeMargin,
-          Math.min(tileSize - clusterIconSize - edgeMargin, rawDrawY)
-        );
+        const drawX = cluster.cx - halfIcon;
+        const drawY = cluster.cy - halfIcon;
         const categoryId = cluster.categoryId;
         const iconFile = categoryId ? iconMap[String(categoryId)] : undefined;
         if (iconFile) {
@@ -335,17 +315,8 @@ export async function drawTreesOnCanvas(
               const iconPath = path.resolve(process.cwd(), "src/assets/icons", iconFile);
               iconCache[iconFile] = await loadImage(iconPath);
             }
-            const rawDrawX = px - halfSingle;
-            const rawDrawY = py - halfSingle;
-            const edgeMargin = iconSizeSingle * 0.5;
-            const drawX = Math.max(
-              edgeMargin,
-              Math.min(tileSize - iconSizeSingle - edgeMargin, rawDrawX)
-            );
-            const drawY = Math.max(
-              edgeMargin,
-              Math.min(tileSize - iconSizeSingle - edgeMargin, rawDrawY)
-            );
+            const drawX = px - halfSingle;
+            const drawY = py - halfSingle;
             ctx.drawImage(iconCache[iconFile], drawX, drawY, iconSizeSingle, iconSizeSingle);
           } else {
             ctx.fillStyle = "green";
@@ -376,18 +347,8 @@ export async function drawTreesOnCanvas(
 
       const size = 72 + (z - 15) * 12;
       const half = size / 2;
-      const rawDrawX = px - half;
-      const rawDrawY = py - half;
-      const edgeMargin = size * 0.5;
-      const drawX = Math.max(
-        edgeMargin,
-        Math.min(tileSize - size - edgeMargin, rawDrawX)
-      );
-      const drawY = Math.max(
-        edgeMargin,
-        Math.min(tileSize - size - edgeMargin, rawDrawY)
-      );
-
+      const drawX = px - half;
+      const drawY = py - half;
       ctx.drawImage(icon, drawX, drawY, size, size);
     } else {
       ctx.fillStyle = "green";
@@ -418,9 +379,8 @@ export async function renderTileToBuffer(
     return canvas.toBuffer();
   }
 
-  // Super-tile: render a larger block then crop to the requested tile so cluster bubbles and counts continue across neighbouring tiles.
-  const BLOCK_SIZE = 10; // 10×10 tiles per super-tile
-
+  // Super-tile: render 2×2 block (2x size each side), then crop back the exact tile so positions stay correct.
+  const BLOCK_SIZE = 2;
   const blockX = Math.floor(x / BLOCK_SIZE) * BLOCK_SIZE;
   const blockY = Math.floor(y / BLOCK_SIZE) * BLOCK_SIZE;
 
@@ -435,11 +395,7 @@ export async function renderTileToBuffer(
 
   if (x === blockX && y === blockY) {
     console.log(
-      `[super-tile] start z${z} blockX=${blockX}..${
-        blockX + BLOCK_SIZE - 1
-     } blockY=${blockY}..${blockY + BLOCK_SIZE - 1} (canvas=${RENDER_SIZE * BLOCK_SIZE}x${
-        RENDER_SIZE * BLOCK_SIZE
-      })`
+      `[super-tile] z${z} ${BLOCK_SIZE}×${BLOCK_SIZE} block (${blockX},${blockY}) canvas=${RENDER_SIZE * BLOCK_SIZE}x${RENDER_SIZE * BLOCK_SIZE}`
     );
   }
 
@@ -447,10 +403,13 @@ export async function renderTileToBuffer(
   const blockRenderSize = RENDER_SIZE * BLOCK_SIZE;
   const bigCanvas = await drawTreesOnCanvas(trees, blockBBox, z, blockRenderSize);
 
-  const tileCanvas = createCanvas(RENDER_SIZE, RENDER_SIZE);
-  const ctx = tileCanvas.getContext("2d");
+  // Crop exactly the tile rectangle (no padding, no scaling) so lat/lon positions stay correct.
+  // Icons at edges are still drawn because they were rendered on the big canvas (overflow into neighbor area).
   const offsetX = (x - blockX) * RENDER_SIZE;
   const offsetY = (y - blockY) * RENDER_SIZE;
+
+  const tileCanvas = createCanvas(RENDER_SIZE, RENDER_SIZE);
+  const ctx = tileCanvas.getContext("2d");
   ctx.drawImage(
     bigCanvas,
     offsetX,

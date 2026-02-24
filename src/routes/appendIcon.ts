@@ -30,6 +30,12 @@ interface AppendIconBody {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const body = req.body as AppendIconBody;
+    console.log("[append-icon] request body:", {
+      lat: body.lat,
+      lon: body.lon,
+      categoryId: body.categoryId,
+      zoomLevels: body.zoomLevels,
+    });
     const result = await appendIconForPoint({
       lat: body.lat,
       lon: body.lon,
@@ -37,6 +43,9 @@ router.post("/", async (req: Request, res: Response) => {
       zoomLevels: body.zoomLevels,
     });
 
+    console.log(
+      `[append-icon] success: ${result.tilesUpdated} tiles updated, zoomLevels: [${result.zoomLevels.join(", ")}]`
+    );
     return res.json({
       ok: true,
       ...result,
