@@ -49,6 +49,6 @@ app.use("/species", speciesRouter);
 // status.json read/update (GET + PUT)
 app.use("/status", statusRouter);
 
-app.listen(PORT, () => {
+app.listen(Number(PORT), "0.0.0.0", () => {
   console.log(`[server] canvas-tile-api started on port ${PORT}`);
 });
