@@ -264,11 +264,10 @@ export async function drawTreesOnCanvas(
   // z 15: hybrid – cluster only when dense (count ≥ 5), else draw trees individually
   if (z === 15 && trees.length > 0) {
     const clusters = clusterTrees(trees, bbox, tileSize, 15);
-    // Zoom 15: use slightly smaller icons
+    // Zoom 15: use slightly smaller icons (60% of the previous size)
     const clusterIconSize = 26; // ~60% of 44
     const halfIcon = clusterIconSize / 2;
-    // Single-tree icons on z15: use 75% of the current size
-    const iconSizeSingle = 21; // 75% of 28px
+    const iconSizeSingle = 36; // ~60% of 60 for single tree at z 15
     const halfSingle = iconSizeSingle / 2;
 
     for (const cluster of clusters) {
@@ -363,16 +362,20 @@ export async function drawTreesOnCanvas(
 }
 
 // high-level: render tile buffer
-// useSuperTile: when true, render 10×10 block and crop (smoother clusters across edges); when false, render single tile only (faster).
+// superTileSize: when > 1, render a BLOCK_SIZE×BLOCK_SIZE multi-tile block and crop (smoother clusters across edges);
+// when undefined or ≤ 1, render single tile only (faster).
 export async function renderTileToBuffer(
   z: number,
   x: number,
   y: number,
   payloadUrl: string,
   categoryId?: number,
-  useSuperTile: boolean = false
+  superTileSize?: number
 ): Promise<Buffer> {
-  if (!useSuperTile) {
+  const BLOCK_SIZE =
+    typeof superTileSize === "number" && superTileSize > 1 ? Math.floor(superTileSize) : 0;
+
+  if (!BLOCK_SIZE) {
     // Single-tile: fetch and render only this tile's bbox (faster, no cross-tile clustering).
     const bbox = tileBBox(x, y, z);
     const trees = await fetchTreesInBBox(payloadUrl, bbox, categoryId);
@@ -380,8 +383,6 @@ export async function renderTileToBuffer(
     return canvas.toBuffer();
   }
 
-  // Super-tile: render 2×2 block (2x size each side), then crop back the exact tile so positions stay correct.
-  const BLOCK_SIZE = 2;
   const blockX = Math.floor(x / BLOCK_SIZE) * BLOCK_SIZE;
   const blockY = Math.floor(y / BLOCK_SIZE) * BLOCK_SIZE;
 
