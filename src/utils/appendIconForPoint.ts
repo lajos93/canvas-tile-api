@@ -141,25 +141,15 @@ export async function appendIconForPoint(input: AppendIconInput): Promise<Append
   const updatedKeys: string[] = [];
 
   for (const { z, x, y } of tiles) {
-    // 1) Default tile: all trees → tiles/{z}/{x}/{y}.avif (try append onto existing, else full render)
+    // 1) Default tile: all trees → tiles/{z}/{x}/{y}.avif
+    // Always re-render from Payload so the tile reflects the current DB state
     try {
       const defaultKey = `tiles/${z}/${x}/${y}.avif`;
-      let avifBuffer: Buffer | null = await tryAppendOntoExistingTile(
-        defaultKey,
-        lat,
-        lon,
-        x,
-        y,
-        z,
-        categoryId ?? undefined
-      );
-      if (!avifBuffer) {
-        const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined);
-        avifBuffer = await sharp(buffer)
-          .resize(TILE_SIZE, TILE_SIZE)
-          .avif({ quality: 72 })
-          .toBuffer();
-      }
+      const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined);
+      const avifBuffer = await sharp(buffer)
+        .resize(TILE_SIZE, TILE_SIZE)
+        .avif({ quality: 72 })
+        .toBuffer();
       await uploadToS3(defaultKey, avifBuffer, "image/avif");
       updatedCount++;
       updatedKeys.push(defaultKey);
@@ -168,25 +158,15 @@ export async function appendIconForPoint(input: AppendIconInput): Promise<Append
     }
 
     // 2) Category tile (if categoryId and category slug are available)
+    // Also always re-render from Payload to avoid accumulating old icons
     if (categoryId != null && categorySlug) {
       try {
         const categoryKey = `tiles/category/${categorySlug}/${z}/${x}/${y}.avif`;
-        let avifBuffer: Buffer | null = await tryAppendOntoExistingTile(
-          categoryKey,
-          lat,
-          lon,
-          x,
-          y,
-          z,
-          categoryId
-        );
-        if (!avifBuffer) {
-          const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId);
-          avifBuffer = await sharp(buffer)
-            .resize(TILE_SIZE, TILE_SIZE)
-            .avif({ quality: 72 })
-            .toBuffer();
-        }
+        const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId);
+        const avifBuffer = await sharp(buffer)
+          .resize(TILE_SIZE, TILE_SIZE)
+          .avif({ quality: 72 })
+          .toBuffer();
         await uploadToS3(categoryKey, avifBuffer, "image/avif");
         updatedCount++;
         updatedKeys.push(categoryKey);

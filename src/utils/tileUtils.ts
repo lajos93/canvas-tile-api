@@ -264,10 +264,11 @@ export async function drawTreesOnCanvas(
   // z 15: hybrid – cluster only when dense (count ≥ 5), else draw trees individually
   if (z === 15 && trees.length > 0) {
     const clusters = clusterTrees(trees, bbox, tileSize, 15);
-    // Zoom 15: use slightly smaller icons (60% of the previous size)
+    // Zoom 15: use slightly smaller icons
     const clusterIconSize = 26; // ~60% of 44
     const halfIcon = clusterIconSize / 2;
-    const iconSizeSingle = 36; // ~60% of 60 for single tree at z 15
+    // Single-tree icons on z15: use 75% of the current size
+    const iconSizeSingle = 21; // 75% of 28px
     const halfSingle = iconSizeSingle / 2;
 
     for (const cluster of clusters) {
