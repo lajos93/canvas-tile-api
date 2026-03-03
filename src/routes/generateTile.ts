@@ -19,8 +19,10 @@ interface GenerateTileBody {
   categoryId: number;
   /** Optional zoom levels to generate (default: MANUAL_ZOOM_LEVELS). */
   zoomLevels?: number[];
-  /** If true, use super-tile (10×10 block) for smoother clusters; default false = single-tile only (faster). */
+  /** If true, use super-tile for smoother clusters; default false = single-tile only (faster). */
   superTile?: boolean;
+  /** Optional super-tile block size (e.g. 3 → 3×3, 5 → 5×5). When omitted but superTile=true, a backend default is used. */
+  superTileSize?: number;
 }
 
 /** POST body: default-only tile generation (no category). */
@@ -29,6 +31,7 @@ interface GenerateTileDefaultBody {
   lon: number;
   zoomLevels?: number[];
   superTile?: boolean;
+  superTileSize?: number;
 }
 
 /**
@@ -47,13 +50,19 @@ router.post("/", async (req: Request, res: Response) => {
       categoryId: body.categoryId,
       zoomLevels: body.zoomLevels,
       superTile: body.superTile,
+      superTileSize: body.superTileSize,
     });
-    const { lat, lon, categoryId, zoomLevels: bodyZoomLevels, superTile } = body;
+    const { lat, lon, categoryId, zoomLevels: bodyZoomLevels, superTile, superTileSize } = body;
     const zoomLevels =
       Array.isArray(bodyZoomLevels) && bodyZoomLevels.length > 0
         ? bodyZoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 15)
         : MANUAL_ZOOM_LEVELS;
-    const useSuperTile = superTile === true;
+    const resolvedSuperTileSize =
+      typeof superTileSize === "number" && superTileSize > 1
+        ? Math.min(Math.floor(superTileSize), 9)
+        : superTile === true
+          ? 3
+          : undefined;
 
     if (
       typeof lat !== "number" ||
@@ -87,7 +96,14 @@ router.post("/", async (req: Request, res: Response) => {
 
       // 1) Default tile: all trees → tiles/{z}/{x}/{y}.avif
       try {
-        const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined, useSuperTile);
+        const buffer = await renderTileToBuffer(
+          z,
+          x,
+          y,
+          PAYLOAD_URL,
+          undefined,
+          resolvedSuperTileSize
+        );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         await uploadToS3(`tiles/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
         count++;
@@ -97,7 +113,14 @@ router.post("/", async (req: Request, res: Response) => {
 
       // 2) Category tile → tiles/category/{slug}/{z}/{x}/{y}.avif
       try {
-        const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId, useSuperTile);
+        const buffer = await renderTileToBuffer(
+          z,
+          x,
+          y,
+          PAYLOAD_URL,
+          categoryId,
+          resolvedSuperTileSize
+        );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         await uploadToS3(`tiles/category/${slug}/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
         count++;
@@ -107,7 +130,9 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     console.log(
-      `[generate-tile] success: ${count} tiles, zoomLevels: [${zoomLevels.join(", ")}], superTile: ${useSuperTile}, categorySlug: ${slug}`
+      `[generate-tile] success: ${count} tiles, zoomLevels: [${zoomLevels.join(
+        ", "
+      )}], superTileSize: ${resolvedSuperTileSize ?? 0}, categorySlug: ${slug}`
     );
     res.json({
       ok: true,
@@ -138,13 +163,19 @@ router.post("/default", async (req: Request, res: Response) => {
       lon: body.lon,
       zoomLevels: body.zoomLevels,
       superTile: body.superTile,
+      superTileSize: body.superTileSize,
     });
-    const { lat, lon, zoomLevels: bodyZoomLevels, superTile } = body;
+    const { lat, lon, zoomLevels: bodyZoomLevels, superTile, superTileSize } = body;
     const zoomLevels =
       Array.isArray(bodyZoomLevels) && bodyZoomLevels.length > 0
         ? bodyZoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 15)
         : MANUAL_ZOOM_LEVELS;
-    const useSuperTile = superTile === true;
+    const resolvedSuperTileSize =
+      typeof superTileSize === "number" && superTileSize > 1
+        ? Math.min(Math.floor(superTileSize), 9)
+        : superTile === true
+          ? 3
+          : undefined;
 
     if (
       typeof lat !== "number" ||
@@ -170,7 +201,14 @@ router.post("/default", async (req: Request, res: Response) => {
       const y = lat2tile(lat, z);
 
       try {
-        const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined, useSuperTile);
+        const buffer = await renderTileToBuffer(
+          z,
+          x,
+          y,
+          PAYLOAD_URL,
+          undefined,
+          resolvedSuperTileSize
+        );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         await uploadToS3(`tiles/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
         count++;
@@ -180,7 +218,9 @@ router.post("/default", async (req: Request, res: Response) => {
     }
 
     console.log(
-      `[generate-tile/default] success: ${count} tiles, zoomLevels: [${zoomLevels.join(", ")}], superTile: ${useSuperTile}`
+      `[generate-tile/default] success: ${count} tiles, zoomLevels: [${zoomLevels.join(
+        ", "
+      )}], superTileSize: ${resolvedSuperTileSize ?? 0}`
     );
     res.json({
       ok: true,

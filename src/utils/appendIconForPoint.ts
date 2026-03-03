@@ -24,7 +24,8 @@ export interface AppendIconResult {
 }
 
 const TILE_SIZE = 256;
-const APPEND_ICON_SIZE = 24;
+// Append icon size on the tile.
+const APPEND_ICON_SIZE = 18;
 
 function normalizeZoomLevels(raw?: number[]): number[] {
   // Default zoom levels: z7–z15 (same range as manual tile generation)

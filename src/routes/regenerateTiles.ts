@@ -22,8 +22,10 @@ interface RegenerateBody {
   lon: number;
   /** Optional zoom levels to regenerate (default: REGENERATE_ZOOM_LEVELS or env) */
   zoomLevels?: number[];
-  /** When true, render 5×5 super-tile and crop center (icons at edges not cut off) */
+  /** When true, use super-tile rendering; exact size can be controlled via superTileSize. */
   superTile?: boolean;
+  /** Optional super-tile block size (e.g. 3 → 3×3, 5 → 5×5). When omitted but superTile=true, a backend default is used. */
+  superTileSize?: number;
   /** When set, also regenerate tiles/category/{slug}/ for this category (e.g. from admin filter or target) */
   categoryId?: number;
 }
@@ -65,11 +67,17 @@ router.post("/", async (req: Request, res: Response) => {
         lon: body.lon,
         zoomLevels: body.zoomLevels,
         superTile: body.superTile,
+        superTileSize: body.superTileSize,
         categoryId: body.categoryId,
       })
     );
     const { treeId, lat, lon } = body;
-    const useSuperTile = body.superTile === true;
+    const resolvedSuperTileSize =
+      typeof body.superTileSize === "number" && body.superTileSize > 1
+        ? Math.min(Math.floor(body.superTileSize), 9)
+        : body.superTile === true
+          ? 3
+          : undefined;
 
     if (
       typeof lat !== "number" ||
@@ -109,9 +117,16 @@ router.post("/", async (req: Request, res: Response) => {
 
     const tiles: { z: number; x: number; y: number }[] = [];
     for (const z of zoomLevelsToUse) {
-      const x = lon2tile(lon, z);
-      const y = lat2tile(lat, z);
-      tiles.push({ z, x, y });
+      const centerX = lon2tile(lon, z);
+      const centerY = lat2tile(lat, z);
+      // Regenerate a 3×3 block around the point so that
+      // any icons rendered near tile edges (or via superTile)
+      // are also refreshed in neighboring tiles.
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          tiles.push({ z, x: centerX + dx, y: centerY + dy });
+        }
+      }
     }
 
     let count = 0;
@@ -120,7 +135,14 @@ router.post("/", async (req: Request, res: Response) => {
       // Full regen only (no append): redraw tile from Payload, then upload.
       // 1) Default tile: all trees → tiles/{z}/{x}/{y}.avif
       try {
-        const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined, useSuperTile);
+        const buffer = await renderTileToBuffer(
+          z,
+          x,
+          y,
+          PAYLOAD_URL,
+          undefined,
+          resolvedSuperTileSize
+        );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         const key = `tiles/${z}/${x}/${y}.avif`;
         await uploadToS3(key, avifBuffer, "image/avif");
@@ -133,11 +155,25 @@ router.post("/", async (req: Request, res: Response) => {
       if (categoryId != null) {
         try {
           const categoryName = await getCategoryNameById(categoryId);
-          if (categoryName) {
-            const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId, useSuperTile);
-            const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
+          if (!categoryName) {
+            console.warn(
+              `[regenerate-tiles] Skipping category tile for z${z} x${x} y${y}: unknown categoryId=${categoryId}`
+            );
+          } else {
             const slug = slugify(categoryName);
+            const buffer = await renderTileToBuffer(
+              z,
+              x,
+              y,
+              PAYLOAD_URL,
+              categoryId,
+              resolvedSuperTileSize
+            );
+            const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
             const key = `tiles/category/${slug}/${z}/${x}/${y}.avif`;
+            console.log(
+              `[regenerate-tiles] writing category tile key=${key} (categoryId=${categoryId}, name="${categoryName}")`
+            );
             await uploadToS3(key, avifBuffer, "image/avif");
             count++;
           }
@@ -151,7 +187,9 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     console.log(
-      `[regenerate-tiles] success: ${count} tiles, zoomLevels: [${zoomLevelsToUse.join(", ")}], superTile: ${useSuperTile}, categoryId: ${categoryId ?? "—"}`
+      `[regenerate-tiles] success: ${count} tiles, zoomLevels: [${zoomLevelsToUse.join(
+        ", "
+      )}], superTileSize: ${resolvedSuperTileSize ?? 0}, categoryId: ${categoryId ?? "—"}`
     );
     res.json({ ok: true, tilesRegenerated: count, zoomLevels: zoomLevelsToUse, categoryId: categoryId ?? null });
   } catch (err) {
