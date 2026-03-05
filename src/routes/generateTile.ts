@@ -138,7 +138,7 @@ router.post("/", async (req: Request, res: Response) => {
       ok: true,
       tilesRegenerated: count,
       zoomLevels,
-      superTile: useSuperTile,
+      superTile,
       categoryId,
       categorySlug: slug,
     });
@@ -226,7 +226,7 @@ router.post("/default", async (req: Request, res: Response) => {
       ok: true,
       tilesRegenerated: count,
       zoomLevels,
-      superTile: useSuperTile,
+      superTile,
     });
   } catch (err) {
     console.error("[generate-tile/default]", err);
