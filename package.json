@@ -23,6 +23,7 @@
     "@aws-sdk/client-s3": "^3.876.0",
     "archiver": "^7.0.1",
     "canvas": "^3.2.0",
+    "cors": "^2.8.6",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "lodash.mergewith": "^4.6.2",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@types/archiver": "^6.0.3",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/lodash.mergewith": "^4.6.9",
     "@types/node": "^24.3.0",

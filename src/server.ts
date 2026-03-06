@@ -1,4 +1,5 @@
 import "dotenv/config";
+import cors from "cors";
 import express from "express";
 
 import tilesRouter from "./routes/tiles";
@@ -13,6 +14,21 @@ import addTreeWorkflowRouter from "./routes/addTreeWorkflow";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// CORS: allow frontend origins from env CORS_ORIGINS (comma-separated)
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
+  : [];
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // same-origin or server requests
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      cb(null, false);
+    },
+  })
+);
 
 // Allow PUT /status to accept JSON body
 app.use(express.json());
