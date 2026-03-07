@@ -12,6 +12,8 @@ interface AddTreeWorkflowBody {
   county?: string;
   /** Category of the species; when set, append-icon updates both default and category tiles */
   categoryId?: number;
+  /** Payload users id – who added the tree (optional) */
+  addedBy?: number;
 }
 
 interface PayloadTreeDoc {
@@ -34,7 +36,7 @@ router.post("/", async (req: Request, res: Response) => {
   const startedAt = new Date().toISOString();
 
   const body = req.body as AddTreeWorkflowBody;
-  const { lat, lon, speciesId, county, categoryId: bodyCategoryId } = body;
+  const { lat, lon, speciesId, county, categoryId: bodyCategoryId, addedBy } = body;
 
   if (
     typeof lat !== "number" ||
@@ -88,6 +90,7 @@ router.post("/", async (req: Request, res: Response) => {
         lat,
         lon,
         ...(county ? { county } : {}),
+        ...(typeof addedBy === "number" ? { addedBy } : {}),
       }),
     });
 

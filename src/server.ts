@@ -11,6 +11,8 @@ import speciesRouter from "./routes/species";
 import statusRouter from "./routes/status";
 import appendIconRouter from "./routes/appendIcon";
 import addTreeWorkflowRouter from "./routes/addTreeWorkflow";
+import backupRouter from "./routes/backup";
+import restoreFromBackupRouter from "./routes/restoreFromBackup";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -64,6 +66,12 @@ app.use("/species", speciesRouter);
 
 // status.json read/update (GET + PUT)
 app.use("/status", statusRouter);
+
+// backup: copy tiles to backup/{id}/tiles/... + status.json
+app.use("/backup", backupRouter);
+
+// restore: copy affected tiles from latest backup before treeCreatedAt back to live
+app.use("/restore-from-backup", restoreFromBackupRouter);
 
 app.listen(Number(PORT), "0.0.0.0", () => {
   console.log(`[server] canvas-tile-api started on port ${PORT}`);

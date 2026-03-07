@@ -59,20 +59,56 @@ export async function getS3ObjectBuffer(key: string): Promise<Buffer | null> {
 }
 
 /**
+ * List S3 "folder" names (common prefixes) under the given prefix, without listing every object.
+ * Uses Delimiter="/" so only direct children prefixes are returned (e.g. tiles/category/alma/).
+ */
+export async function listS3CommonPrefixes(prefix: string): Promise<string[]> {
+  const prefixes: string[] = [];
+  let continuationToken: string | undefined = undefined;
+  do {
+    const response = (await s3.send(
+      new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: prefix,
+        Delimiter: "/",
+        ContinuationToken: continuationToken,
+      })
+    )) as ListObjectsV2CommandOutput;
+    if (response.CommonPrefixes) {
+      for (const p of response.CommonPrefixes) {
+        if (p.Prefix) prefixes.push(p.Prefix);
+      }
+    }
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+  return prefixes;
+}
+
+/** Set to a prefix (e.g. "tiles/7") to log list progress for that prefix only. */
+const LIST_PROGRESS_LOG_PREFIX: string | null = "tiles/";
+
+/**
  * Listing all S3 object keys with the given prefix.
  */
 export async function listS3Objects(prefix: string): Promise<string[]> {
   let keys: string[] = [];
   let continuationToken: string | undefined = undefined;
+  let pageCount = 0;
 
   do {
-    const response: ListObjectsV2CommandOutput = await s3.send(
+    const response = (await s3.send(
       new ListObjectsV2Command({
         Bucket: bucketName,
         Prefix: prefix,
         ContinuationToken: continuationToken,
       })
-    );
+    )) as ListObjectsV2CommandOutput;
+
+    pageCount++;
+    const pageSize = response.Contents?.length ?? 0;
+    if (LIST_PROGRESS_LOG_PREFIX != null && prefix.startsWith(LIST_PROGRESS_LOG_PREFIX) && (pageCount === 1 || pageCount % 10 === 0 || !response.NextContinuationToken)) {
+      console.log("[s3 list]", prefix, "page", pageCount, "+", pageSize, "keys, total so far:", keys.length + pageSize);
+    }
 
     if (response.Contents) {
       for (const obj of response.Contents) {
