@@ -14,6 +14,11 @@ interface AddTreeWorkflowBody {
   categoryId?: number;
   /** Payload users id – who added the tree (optional) */
   addedBy?: number;
+  /**
+   * When true: insert tree in Payload only; skip appendIcon / tile updates.
+   * Response still returns ok: true and phases.appendIcon.skipped: true.
+   */
+  skipAppendIcon?: boolean;
 }
 
 interface PayloadTreeDoc {
@@ -36,7 +41,15 @@ router.post("/", async (req: Request, res: Response) => {
   const startedAt = new Date().toISOString();
 
   const body = req.body as AddTreeWorkflowBody;
-  const { lat, lon, speciesId, county, categoryId: bodyCategoryId, addedBy } = body;
+  const {
+    lat,
+    lon,
+    speciesId,
+    county,
+    categoryId: bodyCategoryId,
+    addedBy,
+    skipAppendIcon,
+  } = body;
 
   if (
     typeof lat !== "number" ||
@@ -66,6 +79,7 @@ router.post("/", async (req: Request, res: Response) => {
     appendIcon: {
       ok: boolean;
       error?: string | null;
+      skipped?: boolean;
       tilesUpdated?: number;
       zoomLevels?: number[];
       categoryId?: number | null;
@@ -117,29 +131,34 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
-    // Phase 2: append icon on tiles (default + category tile when categoryId is set)
-    try {
-      const appendResult = await appendIconForPoint({
-        lat,
-        lon,
-        categoryId,
-      });
-
+    // Phase 2: append icon on tiles (optional)
+    if (skipAppendIcon === true) {
       phases.appendIcon.ok = true;
-      phases.appendIcon.tilesUpdated = appendResult.tilesUpdated;
-      phases.appendIcon.zoomLevels = appendResult.zoomLevels;
-      phases.appendIcon.categoryId = appendResult.categoryId;
-      if (appendResult.categorySlug) {
-        phases.appendIcon.categorySlug = appendResult.categorySlug;
+      phases.appendIcon.skipped = true;
+    } else {
+      try {
+        const appendResult = await appendIconForPoint({
+          lat,
+          lon,
+          categoryId,
+        });
+
+        phases.appendIcon.ok = true;
+        phases.appendIcon.tilesUpdated = appendResult.tilesUpdated;
+        phases.appendIcon.zoomLevels = appendResult.zoomLevels;
+        phases.appendIcon.categoryId = appendResult.categoryId;
+        if (appendResult.categorySlug) {
+          phases.appendIcon.categorySlug = appendResult.categorySlug;
+        }
+      } catch (err) {
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "append-icon phase failed (see server logs)";
+        phases.appendIcon.ok = false;
+        phases.appendIcon.error = msg;
+        throw new Error(msg);
       }
-    } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "append-icon phase failed (see server logs)";
-      phases.appendIcon.ok = false;
-      phases.appendIcon.error = msg;
-      throw new Error(msg);
     }
 
     const finishedAt = new Date().toISOString();
