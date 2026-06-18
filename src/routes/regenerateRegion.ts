@@ -18,6 +18,10 @@ interface RegenerateRegionLayer {
 
 interface RegenerateRegionBody {
   layers: RegenerateRegionLayer[];
+  /** When true, render BLOCK_SIZE×BLOCK_SIZE tile blocks and crop (prevents edge clipping). */
+  superTile?: boolean;
+  /** Block size (e.g. 3 → 3×3). Defaults to 3 when superTile=true. */
+  superTileSize?: number;
 }
 
 function tileKey(t: TileCoord): string {
@@ -42,7 +46,8 @@ async function renderAndUploadOne(
   z: number,
   x: number,
   y: number,
-  categoryId: number | null | undefined
+  categoryId: number | null | undefined,
+  superTileSize?: number
 ): Promise<boolean> {
   if (categoryId != null) {
     const categoryName = await getCategoryNameById(categoryId);
@@ -51,13 +56,13 @@ async function renderAndUploadOne(
       return false;
     }
     const slug = slugify(categoryName);
-    const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId);
+    const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId, superTileSize);
     const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
     await uploadToS3(`tiles/category/${slug}/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
     return true;
   }
 
-  const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined);
+  const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined, superTileSize);
   const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
   await uploadToS3(`tiles/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
   return true;
@@ -91,8 +96,15 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "No valid tiles in layers" });
     }
 
+    const resolvedSuperTileSize =
+      typeof body.superTileSize === "number" && body.superTileSize > 1
+        ? Math.min(Math.floor(body.superTileSize), 9)
+        : body.superTile === true
+          ? 3
+          : undefined;
+
     console.log(
-      `[regenerate-region] start: ${layers.length} layer(s), ${tilesPlanned} tile(s)`
+      `[regenerate-region] start: ${layers.length} layer(s), ${tilesPlanned} tile(s), superTileSize: ${resolvedSuperTileSize ?? 0}`
     );
 
     let tilesRegenerated = 0;
@@ -109,7 +121,7 @@ router.post("/", async (req: Request, res: Response) => {
           );
         }
         try {
-          const ok = await renderAndUploadOne(z, x, y, layer.categoryId);
+          const ok = await renderAndUploadOne(z, x, y, layer.categoryId, resolvedSuperTileSize);
           if (ok) tilesRegenerated++;
           else failedTiles.push({ z, x, y });
         } catch (err) {
