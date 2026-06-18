@@ -5,6 +5,7 @@ import express from "express";
 import tilesRouter from "./routes/tiles";
 import generateRouter from "./routes/generate";
 import regenerateTilesRouter from "./routes/regenerateTiles";
+import regenerateRegionRouter from "./routes/regenerateRegion";
 import generateTileRouter from "./routes/generateTile";
 import generateRegionRouter from "./routes/generateRegion";
 import speciesRouter from "./routes/species";
@@ -48,6 +49,9 @@ app.use("/generate", generateRouter);
 
 // webhook: regenerate tiles for a new tree (POST body: { treeId, lat, lon })
 app.use("/regenerate-tiles", regenerateTilesRouter);
+
+// batch: synchronous region / deduplicated tile list (admin pending publish)
+app.use("/regenerate-region", regenerateRegionRouter);
 
 // targeted refresh around a point / zoom selection (used by "Append" in the app)
 app.use("/append-icon", appendIconRouter);

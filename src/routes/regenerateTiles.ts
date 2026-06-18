@@ -129,11 +129,18 @@ router.post("/", async (req: Request, res: Response) => {
       }
     }
 
+    const layersPerTile = categoryId != null ? 2 : 1;
+    const tilesPlanned = tiles.length * layersPerTile;
     let count = 0;
+    let step = 0;
 
     for (const { z, x, y } of tiles) {
       // Full regen only (no append): redraw tile from Payload, then upload.
       // 1) Default tile: all trees → tiles/{z}/{x}/{y}.avif
+      step++;
+      console.log(
+        `[regenerate-tiles] progress treeId=${treeId ?? "—"} step ${step}/${tilesPlanned} (default z${z}/${x}/${y})`
+      );
       try {
         const buffer = await renderTileToBuffer(
           z,
@@ -153,6 +160,10 @@ router.post("/", async (req: Request, res: Response) => {
 
       // 2) Category tile (when categoryId from body or from treeId) → tiles/category/{slug}/{z}/{x}/{y}.avif
       if (categoryId != null) {
+        step++;
+        console.log(
+          `[regenerate-tiles] progress treeId=${treeId ?? "—"} step ${step}/${tilesPlanned} (category z${z}/${x}/${y})`
+        );
         try {
           const categoryName = await getCategoryNameById(categoryId);
           if (!categoryName) {
@@ -187,11 +198,18 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     console.log(
-      `[regenerate-tiles] success: ${count} tiles, zoomLevels: [${zoomLevelsToUse.join(
+      `[regenerate-tiles] success: ${count}/${tilesPlanned} tiles, zoomLevels: [${zoomLevelsToUse.join(
         ", "
       )}], superTileSize: ${resolvedSuperTileSize ?? 0}, categoryId: ${categoryId ?? "—"}`
     );
-    res.json({ ok: true, tilesRegenerated: count, zoomLevels: zoomLevelsToUse, categoryId: categoryId ?? null });
+    res.json({
+      ok: true,
+      treeId: treeId ?? null,
+      tilesRegenerated: count,
+      tilesPlanned,
+      zoomLevels: zoomLevelsToUse,
+      categoryId: categoryId ?? null,
+    });
   } catch (err) {
     console.error("[regenerate-tiles]", err);
     res.status(500).json({
