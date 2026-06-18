@@ -1,27 +1,43 @@
 import { Router, Request, Response } from "express";
 import sharp from "sharp";
+import PQueue from "p-queue";
 import { renderTileToBuffer } from "../utils/tileUtils";
 import { uploadToS3 } from "../utils/s3/s3Utils";
-import { PAYLOAD_URL } from "../utils/config";
+import { PAYLOAD_URL, TILE_UPLOAD_CONCURRENCY } from "../utils/config";
 import { getCategoryNameById } from "../utils/getCategoryNameById";
 import { slugify } from "../utils/slugify";
+import {
+  compareTilesRowMajor,
+  filterTilesForResume,
+  getLayerProgress,
+  setLayerProgress,
+  type TileCoord,
+} from "../utils/regenerateStatus";
 
 const router = Router();
 
-type TileCoord = { z: number; x: number; y: number };
-
 interface RegenerateRegionLayer {
-  /** Omit or null = default all-trees layer */
   categoryId?: number | null;
   tiles: TileCoord[];
 }
 
+interface StartAfterCoord {
+  z?: number;
+  x: number;
+  y: number;
+  categoryId?: number | null;
+}
+
 interface RegenerateRegionBody {
   layers: RegenerateRegionLayer[];
-  /** When true, render BLOCK_SIZE×BLOCK_SIZE tile blocks and crop (prevents edge clipping). */
   superTile?: boolean;
-  /** Block size (e.g. 3 → 3×3). Defaults to 3 when superTile=true. */
   superTileSize?: number;
+  /** Read last progress from status.json per layer and skip completed tiles. */
+  resume?: boolean;
+  /** Manual resume point (overrides status for matching layer when set). */
+  startAfter?: StartAfterCoord;
+  /** Redo this many tiles before the resume point (overlap for crashed runs). Default 0. */
+  resumeBacktrack?: number;
 }
 
 function tileKey(t: TileCoord): string {
@@ -42,36 +58,16 @@ function dedupeTiles(tiles: TileCoord[]): TileCoord[] {
   return out;
 }
 
-async function renderAndUploadOne(
-  z: number,
-  x: number,
-  y: number,
-  categoryId: number | null | undefined,
-  superTileSize?: number
-): Promise<boolean> {
-  if (categoryId != null) {
-    const categoryName = await getCategoryNameById(categoryId);
-    if (!categoryName) {
-      console.warn(`[regenerate-region] unknown categoryId=${categoryId} z${z}/${x}/${y}`);
-      return false;
-    }
-    const slug = slugify(categoryName);
-    const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, categoryId, superTileSize);
-    const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
-    await uploadToS3(`tiles/category/${slug}/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
-    return true;
-  }
-
-  const buffer = await renderTileToBuffer(z, x, y, PAYLOAD_URL, undefined, superTileSize);
-  const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
-  await uploadToS3(`tiles/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
-  return true;
+function parseStartAfter(raw: unknown): StartAfterCoord | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as StartAfterCoord;
+  if (typeof o.x !== "number" || typeof o.y !== "number") return null;
+  return o;
 }
 
 /**
  * POST /regenerate-region
- * Body: { layers: [{ categoryId?: number|null, tiles: [{ z, x, y }] }] }
- * Synchronous batch regen — waits until all tiles are rendered (admin pending publish).
+ * Body: { layers, resume?, startAfter?, resumeBacktrack?, superTile?, superTileSize? }
  */
 router.post("/", async (req: Request, res: Response) => {
   try {
@@ -86,15 +82,12 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(500).json({ error: "PAYLOAD_URL environment variable not set" });
     }
 
-    const layers = rawLayers.map((layer) => ({
-      categoryId: layer.categoryId ?? null,
-      tiles: dedupeTiles(Array.isArray(layer.tiles) ? layer.tiles : []),
-    }));
-
-    const tilesPlanned = layers.reduce((n, l) => n + l.tiles.length, 0);
-    if (tilesPlanned === 0) {
-      return res.status(400).json({ error: "No valid tiles in layers" });
-    }
+    const resume = body.resume === true;
+    const manualStartAfter = parseStartAfter(body.startAfter);
+    const backtrack =
+      typeof body.resumeBacktrack === "number" && body.resumeBacktrack >= 0
+        ? Math.floor(body.resumeBacktrack)
+        : 0;
 
     const resolvedSuperTileSize =
       typeof body.superTileSize === "number" && body.superTileSize > 1
@@ -103,43 +96,134 @@ router.post("/", async (req: Request, res: Response) => {
           ? 3
           : undefined;
 
-    console.log(
-      `[regenerate-region] start: ${layers.length} layer(s), ${tilesPlanned} tile(s), superTileSize: ${resolvedSuperTileSize ?? 0}`
-    );
+    let totalSkipped = 0;
+    let tilesPlanned = 0;
+    const layerPlans: Array<{
+      categoryId: number | null;
+      categorySlug?: string;
+      tiles: TileCoord[];
+      resumeFrom: TileCoord | null;
+    }> = [];
 
-    let tilesRegenerated = 0;
-    let step = 0;
-    const failedTiles: TileCoord[] = [];
+    for (const layer of rawLayers) {
+      const categoryId = layer.categoryId ?? null;
+      const deduped = dedupeTiles(Array.isArray(layer.tiles) ? layer.tiles : []);
+      if (deduped.length === 0) continue;
 
-    for (const layer of layers) {
-      const catLabel = layer.categoryId ?? "default";
-      for (const { z, x, y } of layer.tiles) {
-        step++;
-        if (step % 25 === 0 || step === tilesPlanned) {
-          console.log(
-            `[regenerate-region] progress ${step}/${tilesPlanned} (${catLabel} z${z}/${x}/${y})`
-          );
+      const z = deduped[0]!.z;
+      let resumePoint: TileCoord | null = null;
+
+      if (manualStartAfter) {
+        const matchCategory =
+          manualStartAfter.categoryId === undefined ||
+          manualStartAfter.categoryId === categoryId;
+        if (matchCategory) {
+          resumePoint = {
+            z: typeof manualStartAfter.z === "number" ? manualStartAfter.z : z,
+            x: manualStartAfter.x,
+            y: manualStartAfter.y,
+          };
         }
-        try {
-          const ok = await renderAndUploadOne(z, x, y, layer.categoryId, resolvedSuperTileSize);
-          if (ok) tilesRegenerated++;
-          else failedTiles.push({ z, x, y });
-        } catch (err) {
-          console.error(`[regenerate-region] z${z} x${x} y${y} category=${catLabel} failed:`, err);
-          failedTiles.push({ z, x, y });
+      } else if (resume) {
+        const saved = await getLayerProgress(z, categoryId);
+        if (saved) {
+          resumePoint = { z: saved.z, x: saved.x, y: saved.y };
         }
       }
+
+      const { tiles, skipped, resumeFrom } = filterTilesForResume(deduped, resumePoint, backtrack);
+      totalSkipped += skipped;
+      tilesPlanned += tiles.length;
+
+      let categorySlug: string | undefined;
+      if (categoryId != null) {
+        const categoryName = await getCategoryNameById(categoryId);
+        if (!categoryName) {
+          console.warn(`[regenerate-region] unknown categoryId=${categoryId}, skipping layer`);
+          continue;
+        }
+        categorySlug = slugify(categoryName);
+      }
+
+      layerPlans.push({ categoryId, categorySlug, tiles, resumeFrom });
+    }
+
+    if (tilesPlanned === 0) {
+      return res.json({
+        ok: true,
+        tilesRegenerated: 0,
+        tilesPlanned: 0,
+        tilesSkipped: totalSkipped,
+        layers: layerPlans.length,
+        message: "All tiles already completed for this plan (resume)",
+      });
     }
 
     console.log(
-      `[regenerate-region] done: ${tilesRegenerated}/${tilesPlanned} tiles, failed=${failedTiles.length}`
+      `[regenerate-region] start: ${layerPlans.length} layer(s), ${tilesPlanned} tile(s) (${totalSkipped} skipped resume), superTileSize: ${resolvedSuperTileSize ?? 0}, concurrency: ${TILE_UPLOAD_CONCURRENCY}`
+    );
+
+    let tilesRegenerated = 0;
+    let completed = 0;
+    const failedTiles: TileCoord[] = [];
+    const queue = new PQueue({ concurrency: TILE_UPLOAD_CONCURRENCY });
+    const statusQueue = new PQueue({ concurrency: 1 });
+    const jobs: Array<Promise<void>> = [];
+
+    for (const layer of layerPlans) {
+      const catLabel = layer.categoryId ?? "default";
+      if (layer.resumeFrom) {
+        console.log(
+          `[regenerate-region] layer ${catLabel} resume from z${layer.resumeFrom.z}/${layer.resumeFrom.x}/${layer.resumeFrom.y} (${layer.tiles.length} tiles)`
+        );
+      }
+
+      for (const { z, x, y } of layer.tiles) {
+        jobs.push(
+          queue.add(async () => {
+            try {
+              const buffer = await renderTileToBuffer(
+                z,
+                x,
+                y,
+                PAYLOAD_URL,
+                layer.categoryId ?? undefined,
+                resolvedSuperTileSize
+              );
+              const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
+              const s3Key =
+                layer.categoryId != null && layer.categorySlug
+                  ? `tiles/category/${layer.categorySlug}/${z}/${x}/${y}.avif`
+                  : `tiles/${z}/${x}/${y}.avif`;
+              await uploadToS3(s3Key, avifBuffer, "image/avif");
+              tilesRegenerated++;
+              await statusQueue.add(() => setLayerProgress(z, layer.categoryId, { z, x, y }));
+            } catch (err) {
+              console.error(`[regenerate-region] z${z} x${x} y${y} category=${catLabel} failed:`, err);
+              failedTiles.push({ z, x, y });
+            } finally {
+              completed++;
+              if (completed % 50 === 0 || completed === tilesPlanned) {
+                console.log(`[regenerate-region] progress ${completed}/${tilesPlanned}`);
+              }
+            }
+          })
+        );
+      }
+    }
+
+    await Promise.all(jobs);
+
+    console.log(
+      `[regenerate-region] done: ${tilesRegenerated}/${tilesPlanned} tiles, skipped=${totalSkipped}, failed=${failedTiles.length}`
     );
 
     res.json({
       ok: failedTiles.length === 0,
       tilesRegenerated,
       tilesPlanned,
-      layers: layers.length,
+      tilesSkipped: totalSkipped,
+      layers: layerPlans.length,
       failedTiles: failedTiles.length > 0 ? failedTiles : undefined,
     });
   } catch (err) {

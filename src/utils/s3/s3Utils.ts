@@ -84,8 +84,8 @@ export async function listS3CommonPrefixes(prefix: string): Promise<string[]> {
   return prefixes;
 }
 
-/** Set to a prefix (e.g. "tiles/7") to log list progress for that prefix only. */
-const LIST_PROGRESS_LOG_PREFIX: string | null = "tiles/";
+/** Set to a prefix (e.g. "tiles/7") to log list progress; null = off (avoids 900k+ key spam). */
+const LIST_PROGRESS_LOG_PREFIX: string | null = null;
 
 /**
  * Listing all S3 object keys with the given prefix.

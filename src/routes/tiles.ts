@@ -8,6 +8,7 @@ import {
   getS3ObjectStream,
   listS3Objects,
 } from "../utils/s3/s3Utils";
+import { getLayerProgress } from "../utils/regenerateStatus";
 
 const router = Router();
 const payloadUrl = process.env.PAYLOAD_URL!;
@@ -33,17 +34,50 @@ router.get("/:z/:x/:y.png", async (req, res) => {
 });
 
 /**
- * 📍 Last tile  info
+ * 📍 Last regenerated tile (from status.json — fast; no full S3 list).
+ * Query: ?categoryId=123 (omit for default layer)
+ * ?source=s3 falls back to legacy full S3 scan (slow on large buckets).
  */
 router.get("/last/:zoom", async (req, res) => {
   try {
     const zoom = parseInt(req.params.zoom);
     if (isNaN(zoom)) return res.status(400).json({ error: "Invalid zoom level" });
 
-    const lastTile = await getLastTileByCoordinates(zoom);
+    const source = typeof req.query.source === "string" ? req.query.source : "status";
+    const categoryRaw = req.query.categoryId;
+    const categoryId =
+      categoryRaw === undefined || categoryRaw === "null" || categoryRaw === ""
+        ? null
+        : parseInt(String(categoryRaw), 10);
+
+    if (source !== "s3") {
+      const fromStatus = await getLayerProgress(
+        zoom,
+        categoryId != null && Number.isFinite(categoryId) ? categoryId : null
+      );
+      if (fromStatus) {
+        return res.json({
+          zoom,
+          x: fromStatus.x,
+          y: fromStatus.y,
+          source: "status.json",
+          updatedAt: fromStatus.updatedAt,
+          categoryId: categoryId ?? null,
+        });
+      }
+      return res.status(404).json({
+        error: "No regenerate progress in status.json for this zoom/layer",
+        hint: "Use ?source=s3 for legacy S3 scan (slow) or run regenerate-region first",
+      });
+    }
+
+    const lastTile = await getLastTileByCoordinates(
+      zoom,
+      categoryId != null && Number.isFinite(categoryId) ? String(categoryId) : undefined
+    );
     if (!lastTile) return res.status(404).json({ error: "No tiles found in S3" });
 
-    res.json({ zoom, ...lastTile });
+    res.json({ zoom, ...lastTile, source: "s3" });
   } catch (err) {
     console.error("Error fetching last tile:", err);
     res.status(500).json({ error: "Error fetching last tile" });
