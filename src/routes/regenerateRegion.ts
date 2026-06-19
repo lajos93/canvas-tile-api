@@ -6,6 +6,7 @@ import { uploadToS3 } from "../utils/s3/s3Utils";
 import { PAYLOAD_URL, TILE_UPLOAD_CONCURRENCY } from "../utils/config";
 import { getCategoryNameById } from "../utils/getCategoryNameById";
 import { slugify } from "../utils/slugify";
+import { parseIconScaleByZoom, type IconScaleByZoom } from "../utils/tileIconScale";
 import {
   compareTilesRowMajor,
   filterTilesForResume,
@@ -38,6 +39,12 @@ interface RegenerateRegionBody {
   startAfter?: StartAfterCoord;
   /** Redo this many tiles before the resume point (overlap for crashed runs). Default 0. */
   resumeBacktrack?: number;
+  /** Per-zoom icon size multiplier (e.g. { "16": 0.7, "17": 0.7 }). */
+  iconScaleByZoom?: IconScaleByZoom;
+  /** 1-based index when the client splits a large plan into multiple requests. */
+  chunkIndex?: number;
+  /** Total chunk count for the same admin region run. */
+  chunkTotal?: number;
 }
 
 function tileKey(t: TileCoord): string {
@@ -95,6 +102,21 @@ router.post("/", async (req: Request, res: Response) => {
         : body.superTile === true
           ? 3
           : undefined;
+    const iconScaleByZoom = parseIconScaleByZoom(body.iconScaleByZoom);
+    const chunkIndex =
+      typeof body.chunkIndex === "number" && body.chunkIndex >= 1
+        ? Math.floor(body.chunkIndex)
+        : null;
+    const chunkTotal =
+      typeof body.chunkTotal === "number" && body.chunkTotal >= 1
+        ? Math.floor(body.chunkTotal)
+        : null;
+    const chunkLabel =
+      chunkIndex != null && chunkTotal != null ? `${chunkIndex}/${chunkTotal}` : null;
+
+    if (chunkIndex === 1 && chunkTotal != null) {
+      console.log(`[regenerate-region] ${chunkTotal} chunk(s) planned`);
+    }
 
     let totalSkipped = 0;
     let tilesPlanned = 0;
@@ -160,7 +182,9 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     console.log(
-      `[regenerate-region] start: ${layerPlans.length} layer(s), ${tilesPlanned} tile(s) (${totalSkipped} skipped resume), superTileSize: ${resolvedSuperTileSize ?? 0}, concurrency: ${TILE_UPLOAD_CONCURRENCY}`
+      chunkLabel
+        ? `[regenerate-region] chunk ${chunkLabel} start: ${tilesPlanned} tile(s) (${totalSkipped} skipped resume), superTileSize: ${resolvedSuperTileSize ?? 0}`
+        : `[regenerate-region] start: ${layerPlans.length} layer(s), ${tilesPlanned} tile(s) (${totalSkipped} skipped resume), superTileSize: ${resolvedSuperTileSize ?? 0}, concurrency: ${TILE_UPLOAD_CONCURRENCY}`
     );
 
     let tilesRegenerated = 0;
@@ -188,7 +212,8 @@ router.post("/", async (req: Request, res: Response) => {
                 y,
                 PAYLOAD_URL,
                 layer.categoryId ?? undefined,
-                resolvedSuperTileSize
+                resolvedSuperTileSize,
+                iconScaleByZoom
               );
               const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
               const s3Key =
@@ -215,7 +240,9 @@ router.post("/", async (req: Request, res: Response) => {
     await Promise.all(jobs);
 
     console.log(
-      `[regenerate-region] done: ${tilesRegenerated}/${tilesPlanned} tiles, skipped=${totalSkipped}, failed=${failedTiles.length}`
+      chunkLabel
+        ? `[regenerate-region] chunk ${chunkLabel} done: ${tilesRegenerated}/${tilesPlanned} tiles, failed=${failedTiles.length}`
+        : `[regenerate-region] done: ${tilesRegenerated}/${tilesPlanned} tiles, skipped=${totalSkipped}, failed=${failedTiles.length}`
     );
 
     res.json({

@@ -1,6 +1,7 @@
 import path from "path";
 import { createCanvas, loadImage, Image } from "canvas";
 import { iconMap } from "../utils/tileIcons";
+import { scaledIconSize, type IconScaleByZoom } from "./tileIconScale";
 
 export interface Tree {
   lat: number;
@@ -125,6 +126,28 @@ const CLUSTER_GRID_CELL = 64; // px on 512 canvas for z ≤ 12 → 8×8 grid
 const CLUSTER_GRID_CELL_Z13_14 = 96; // coarser for z 13–14 → fewer clusters
 const CLUSTER_GRID_CELL_Z15 = 64; // for z 15 hybrid
 
+/** Pixel gutter so icons centered on tile edges are not clipped (constant memory vs huge super-tiles). */
+export function iconBleedPixels(z: number, iconScaleByZoom?: IconScaleByZoom): number {
+  if (z >= 16) {
+    return Math.ceil(scaledIconSize(72 + (z - 15) * 12, z, iconScaleByZoom) / 2) + 8;
+  }
+  if (z === 15) {
+    return Math.ceil(scaledIconSize(36, 15, iconScaleByZoom) / 2) + 8;
+  }
+  return Math.ceil(scaledIconSize(44, z, iconScaleByZoom) / 2) + 10;
+}
+
+function cropCanvasRegion(
+  source: ReturnType<typeof createCanvas>,
+  sx: number,
+  sy: number,
+  size: number
+): Buffer {
+  const out = createCanvas(size, size);
+  out.getContext("2d")!.drawImage(source as any, sx, sy, size, size, 0, 0, size, size);
+  return out.toBuffer();
+}
+
 interface Cluster {
   cx: number;
   cy: number;
@@ -194,11 +217,15 @@ export async function drawTreesOnCanvas(
   trees: Tree[],
   bbox: ReturnType<typeof tileBBox>,
   z: number,
-  tileSize: number = RENDER_SIZE
+  tileSize: number = RENDER_SIZE,
+  iconScaleByZoom?: IconScaleByZoom,
+  iconBleedPx = 0
 ) {
-  const canvas = createCanvas(tileSize, tileSize);
+  const bleed = Math.max(0, Math.floor(iconBleedPx));
+  const canvas = createCanvas(tileSize + 2 * bleed, tileSize + 2 * bleed);
   const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, tileSize, tileSize);
+  if (bleed > 0) ctx.translate(bleed, bleed);
+  ctx.clearRect(-bleed, -bleed, tileSize + 2 * bleed, tileSize + 2 * bleed);
 
   ctx.imageSmoothingEnabled = true;
 
@@ -207,7 +234,7 @@ export async function drawTreesOnCanvas(
   if (useClustering && trees.length > 0) {
     // z 7–14: one icon per cluster + count badge
     const clusters = clusterTrees(trees, bbox, tileSize, z);
-    const clusterIconSize = 44; // one larger icon per cluster on (super-)tile canvas
+    const clusterIconSize = scaledIconSize(44, z, iconScaleByZoom);
     const half = clusterIconSize / 2;
 
     for (const cluster of clusters) {
@@ -264,10 +291,9 @@ export async function drawTreesOnCanvas(
   // z 15: hybrid – cluster only when dense (count ≥ 5), else draw trees individually
   if (z === 15 && trees.length > 0) {
     const clusters = clusterTrees(trees, bbox, tileSize, 15);
-    // Zoom 15: use slightly smaller icons (60% of the previous size)
-    const clusterIconSize = 26; // ~60% of 44
+    const clusterIconSize = scaledIconSize(26, 15, iconScaleByZoom);
     const halfIcon = clusterIconSize / 2;
-    const iconSizeSingle = 36; // ~60% of 60 for single tree at z 15
+    const iconSizeSingle = scaledIconSize(36, 15, iconScaleByZoom);
     const halfSingle = iconSizeSingle / 2;
 
     for (const cluster of clusters) {
@@ -345,7 +371,7 @@ export async function drawTreesOnCanvas(
       }
       const icon = iconCache[iconFile];
 
-      const size = 72 + (z - 15) * 12;
+      const size = scaledIconSize(72 + (z - 15) * 12, z, iconScaleByZoom);
       const half = size / 2;
       const drawX = px - half;
       const drawY = py - half;
@@ -370,16 +396,21 @@ export async function renderTileToBuffer(
   y: number,
   payloadUrl: string,
   categoryId?: number,
-  superTileSize?: number
+  superTileSize?: number,
+  iconScaleByZoom?: IconScaleByZoom
 ): Promise<Buffer> {
   const BLOCK_SIZE =
     typeof superTileSize === "number" && superTileSize > 1 ? Math.floor(superTileSize) : 0;
 
   if (!BLOCK_SIZE) {
-    // Single-tile: fetch and render only this tile's bbox (faster, no cross-tile clustering).
     const bbox = tileBBox(x, y, z);
-    const trees = await fetchTreesInBBox(payloadUrl, bbox, categoryId);
-    const canvas = await drawTreesOnCanvas(trees, bbox, z, RENDER_SIZE);
+    const bleed = iconBleedPixels(z, iconScaleByZoom);
+    const fetchBBox = expandTileBBoxForMargin(bbox, bleed, RENDER_SIZE);
+    const trees = await fetchTreesInBBox(payloadUrl, fetchBBox, categoryId);
+    const canvas = await drawTreesOnCanvas(trees, bbox, z, RENDER_SIZE, iconScaleByZoom, bleed);
+    if (bleed > 0) {
+      return cropCanvasRegion(canvas, bleed, bleed, RENDER_SIZE);
+    }
     return canvas.toBuffer();
   }
 
@@ -401,28 +432,21 @@ export async function renderTileToBuffer(
     );
   }
 
-  const trees = await fetchTreesInBBox(payloadUrl, blockBBox, categoryId);
   const blockRenderSize = RENDER_SIZE * BLOCK_SIZE;
-  const bigCanvas = await drawTreesOnCanvas(trees, blockBBox, z, blockRenderSize);
+  const bleed = iconBleedPixels(z, iconScaleByZoom);
+  const fetchBBox = expandTileBBoxForMargin(blockBBox, bleed, blockRenderSize);
+  const trees = await fetchTreesInBBox(payloadUrl, fetchBBox, categoryId);
+  const bigCanvas = await drawTreesOnCanvas(
+    trees,
+    blockBBox,
+    z,
+    blockRenderSize,
+    iconScaleByZoom,
+    bleed
+  );
 
-  // Crop exactly the tile rectangle (no padding, no scaling) so lat/lon positions stay correct.
-  // Icons at edges are still drawn because they were rendered on the big canvas (overflow into neighbor area).
   const offsetX = (x - blockX) * RENDER_SIZE;
   const offsetY = (y - blockY) * RENDER_SIZE;
 
-  const tileCanvas = createCanvas(RENDER_SIZE, RENDER_SIZE);
-  const ctx = tileCanvas.getContext("2d");
-  ctx.drawImage(
-    bigCanvas,
-    offsetX,
-    offsetY,
-    RENDER_SIZE,
-    RENDER_SIZE,
-    0,
-    0,
-    RENDER_SIZE,
-    RENDER_SIZE
-  );
-
-  return tileCanvas.toBuffer();
+  return cropCanvasRegion(bigCanvas, bleed + offsetX, bleed + offsetY, RENDER_SIZE);
 }

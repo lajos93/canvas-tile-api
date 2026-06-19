@@ -25,4 +25,4 @@ export function lat2tile(lat: number, zoom: number): number {
  * These are aligned with the manual append-icon workflow, which focuses
  * on the more detailed, interactive zooms.
  */
-export const REGENERATE_ZOOM_LEVELS = [13, 14, 15, 16];
+export const REGENERATE_ZOOM_LEVELS = [13, 14, 15, 16, 17];

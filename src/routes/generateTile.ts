@@ -6,6 +6,7 @@ import { PAYLOAD_URL } from "../utils/config";
 import { lat2tile, lon2tile } from "../utils/geoBounds";
 import { getCategoryNameById } from "../utils/getCategoryNameById";
 import { slugify } from "../utils/slugify";
+import { parseIconScaleByZoom } from "../utils/tileIconScale";
 
 const router = Router();
 
@@ -23,6 +24,7 @@ interface GenerateTileBody {
   superTile?: boolean;
   /** Optional super-tile block size (e.g. 3 → 3×3, 5 → 5×5). When omitted but superTile=true, a backend default is used. */
   superTileSize?: number;
+  iconScaleByZoom?: Record<string, number>;
 }
 
 /** POST body: default-only tile generation (no category). */
@@ -32,6 +34,7 @@ interface GenerateTileDefaultBody {
   zoomLevels?: number[];
   superTile?: boolean;
   superTileSize?: number;
+  iconScaleByZoom?: Record<string, number>;
 }
 
 /**
@@ -52,10 +55,10 @@ router.post("/", async (req: Request, res: Response) => {
       superTile: body.superTile,
       superTileSize: body.superTileSize,
     });
-    const { lat, lon, categoryId, zoomLevels: bodyZoomLevels, superTile, superTileSize } = body;
+    const { lat, lon, categoryId, zoomLevels: bodyZoomLevels, superTile, superTileSize, iconScaleByZoom: rawIconScale } = body;
     const zoomLevels =
       Array.isArray(bodyZoomLevels) && bodyZoomLevels.length > 0
-        ? bodyZoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 15)
+        ? bodyZoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 17)
         : MANUAL_ZOOM_LEVELS;
     const resolvedSuperTileSize =
       typeof superTileSize === "number" && superTileSize > 1
@@ -63,6 +66,7 @@ router.post("/", async (req: Request, res: Response) => {
         : superTile === true
           ? 3
           : undefined;
+    const iconScaleByZoom = parseIconScaleByZoom(rawIconScale);
 
     if (
       typeof lat !== "number" ||
@@ -102,7 +106,8 @@ router.post("/", async (req: Request, res: Response) => {
           y,
           PAYLOAD_URL,
           undefined,
-          resolvedSuperTileSize
+          resolvedSuperTileSize,
+          iconScaleByZoom
         );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         await uploadToS3(`tiles/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
@@ -119,7 +124,8 @@ router.post("/", async (req: Request, res: Response) => {
           y,
           PAYLOAD_URL,
           categoryId,
-          resolvedSuperTileSize
+          resolvedSuperTileSize,
+          iconScaleByZoom
         );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         await uploadToS3(`tiles/category/${slug}/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");
@@ -165,10 +171,10 @@ router.post("/default", async (req: Request, res: Response) => {
       superTile: body.superTile,
       superTileSize: body.superTileSize,
     });
-    const { lat, lon, zoomLevels: bodyZoomLevels, superTile, superTileSize } = body;
+    const { lat, lon, zoomLevels: bodyZoomLevels, superTile, superTileSize, iconScaleByZoom: rawIconScale } = body;
     const zoomLevels =
       Array.isArray(bodyZoomLevels) && bodyZoomLevels.length > 0
-        ? bodyZoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 15)
+        ? bodyZoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 17)
         : MANUAL_ZOOM_LEVELS;
     const resolvedSuperTileSize =
       typeof superTileSize === "number" && superTileSize > 1
@@ -176,6 +182,7 @@ router.post("/default", async (req: Request, res: Response) => {
         : superTile === true
           ? 3
           : undefined;
+    const iconScaleByZoom = parseIconScaleByZoom(rawIconScale);
 
     if (
       typeof lat !== "number" ||
@@ -207,7 +214,8 @@ router.post("/default", async (req: Request, res: Response) => {
           y,
           PAYLOAD_URL,
           undefined,
-          resolvedSuperTileSize
+          resolvedSuperTileSize,
+          iconScaleByZoom
         );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         await uploadToS3(`tiles/${z}/${x}/${y}.avif`, avifBuffer, "image/avif");

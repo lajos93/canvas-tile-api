@@ -6,6 +6,7 @@ import { PAYLOAD_URL } from "../utils/config";
 import { lat2tile, lon2tile, REGENERATE_ZOOM_LEVELS } from "../utils/geoBounds";
 import { getCategoryNameById } from "../utils/getCategoryNameById";
 import { slugify } from "../utils/slugify";
+import { parseIconScaleByZoom } from "../utils/tileIconScale";
 
 const router = Router();
 
@@ -28,6 +29,7 @@ interface RegenerateBody {
   superTileSize?: number;
   /** When set, also regenerate tiles/category/{slug}/ for this category (e.g. from admin filter or target) */
   categoryId?: number;
+  iconScaleByZoom?: Record<string, number>;
 }
 
 function parseZoomLevels(): number[] {
@@ -78,6 +80,7 @@ router.post("/", async (req: Request, res: Response) => {
         : body.superTile === true
           ? 3
           : undefined;
+    const iconScaleByZoom = parseIconScaleByZoom(body.iconScaleByZoom);
 
     if (
       typeof lat !== "number" ||
@@ -111,7 +114,7 @@ router.post("/", async (req: Request, res: Response) => {
           : undefined;
     const zoomLevels =
       Array.isArray(body.zoomLevels) && body.zoomLevels.length > 0
-        ? body.zoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 15)
+        ? body.zoomLevels.filter((z) => typeof z === "number" && z >= 7 && z <= 17)
         : parseZoomLevels();
     const zoomLevelsToUse = zoomLevels.length > 0 ? zoomLevels : parseZoomLevels();
 
@@ -148,7 +151,8 @@ router.post("/", async (req: Request, res: Response) => {
           y,
           PAYLOAD_URL,
           undefined,
-          resolvedSuperTileSize
+          resolvedSuperTileSize,
+          iconScaleByZoom
         );
         const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
         const key = `tiles/${z}/${x}/${y}.avif`;
@@ -178,7 +182,8 @@ router.post("/", async (req: Request, res: Response) => {
               y,
               PAYLOAD_URL,
               categoryId,
-              resolvedSuperTileSize
+              resolvedSuperTileSize,
+              iconScaleByZoom
             );
             const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
             const key = `tiles/category/${slug}/${z}/${x}/${y}.avif`;

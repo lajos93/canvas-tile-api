@@ -33,8 +33,11 @@ app.use(
   })
 );
 
+// Allow large regenerate-region batches (chunks are small; this is a safety net).
+const JSON_BODY_LIMIT = process.env.EXPRESS_JSON_LIMIT ?? "15mb";
+
 // Allow PUT /status to accept JSON body
-app.use(express.json());
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 // health check / root
 app.get("/", (_, res) => {
