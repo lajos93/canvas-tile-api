@@ -1,4 +1,3 @@
-import path from "path";
 import sharp from "sharp";
 import { renderTileToBuffer, tileBBox } from "./tileUtils";
 import { uploadToS3, getS3ObjectBuffer } from "./s3/s3Utils";
@@ -6,7 +5,7 @@ import { PAYLOAD_URL } from "./config";
 import { lat2tile, lon2tile } from "./geoBounds";
 import { getCategoryNameById } from "./getCategoryNameById";
 import { slugify } from "./slugify";
-import { iconMap } from "./tileIcons";
+import { getCategoryIconBuffer, preloadAllCategoryIcons } from "./categoryIcons";
 
 export interface AppendIconInput {
   lat: number;
@@ -39,16 +38,9 @@ function normalizeZoomLevels(raw?: number[]): number[] {
   return parsed.length > 0 ? parsed : fallback;
 }
 
-/** Load category icon from assets and resize to iconSize; returns PNG buffer for compositing. */
+/** Load category icon from Payload and resize to iconSize; returns PNG buffer for compositing. */
 async function getIconBuffer(categoryId: number, iconSize: number): Promise<Buffer | null> {
-  const iconFile = iconMap[String(categoryId)];
-  if (!iconFile) return null;
-  const iconPath = path.resolve(process.cwd(), "src/assets/icons", iconFile);
-  try {
-    return await sharp(iconPath).resize(iconSize, iconSize).png().toBuffer();
-  } catch {
-    return null;
-  }
+  return getCategoryIconBuffer(categoryId, iconSize);
 }
 
 /**
@@ -116,6 +108,8 @@ export async function appendIconForPoint(input: AppendIconInput): Promise<Append
   if (!PAYLOAD_URL) {
     throw new Error("PAYLOAD_URL environment variable not set");
   }
+
+  await preloadAllCategoryIcons();
 
   const zoomLevels = normalizeZoomLevels(input.zoomLevels);
 

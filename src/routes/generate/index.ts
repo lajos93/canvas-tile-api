@@ -26,7 +26,7 @@ router.get("/start", async (req, res) => {
     const categoryId = parseIntOrUndefined(req.query.type as string);
 
     if (categoryId) {
-      const { ok, error } = checkCategoryIcon(categoryId.toString());
+      const { ok, error } = await checkCategoryIcon(categoryId.toString());
       if (!ok) return res.status(400).json({ error });
     }
 

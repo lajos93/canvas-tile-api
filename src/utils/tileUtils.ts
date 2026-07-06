@@ -1,6 +1,5 @@
-import path from "path";
-import { createCanvas, loadImage, Image } from "canvas";
-import { iconMap } from "../utils/tileIcons";
+import { createCanvas } from "canvas";
+import { loadCategoryIconImage, preloadAllCategoryIcons } from "./categoryIcons";
 import { scaledIconSize, type IconScaleByZoom } from "./tileIconScale";
 
 export interface Tree {
@@ -111,8 +110,34 @@ export async function fetchTreesInBBox(
   return allDocs;
 }
 
-// cache for loaded icons
-const iconCache: Record<string, Image> = {};
+async function drawCategoryIconAt(
+  ctx: any,
+  categoryId: number | undefined,
+  centerX: number,
+  centerY: number,
+  size: number,
+  fallbackRadius: number
+) {
+  if (categoryId == null) {
+    ctx.fillStyle = "green";
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, fallbackRadius, 0, 2 * Math.PI);
+    ctx.fill();
+    return;
+  }
+
+  const icon = await loadCategoryIconImage(categoryId);
+  if (icon) {
+    const half = size / 2;
+    ctx.drawImage(icon as any, centerX - half, centerY - half, size, size);
+    return;
+  }
+
+  ctx.fillStyle = "green";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, fallbackRadius, 0, 2 * Math.PI);
+  ctx.fill();
+}
 
 /** Render at 2x resolution (512) then downscale to 256 for crisper icons. */
 const RENDER_SCALE = 2;
@@ -242,26 +267,14 @@ export async function drawTreesOnCanvas(
       const drawX = cluster.cx - half;
       const drawY = cluster.cy - half;
 
-      if (cluster.categoryId != null) {
-        const iconFile = iconMap[String(cluster.categoryId)];
-        if (iconFile) {
-          if (!iconCache[iconFile]) {
-            const iconPath = path.resolve(process.cwd(), "src/assets/icons", iconFile);
-            iconCache[iconFile] = await loadImage(iconPath);
-          }
-          ctx.drawImage(iconCache[iconFile], drawX, drawY, clusterIconSize, clusterIconSize);
-        } else {
-          ctx.fillStyle = "green";
-          ctx.beginPath();
-          ctx.arc(cluster.cx, cluster.cy, 8, 0, 2 * Math.PI);
-          ctx.fill();
-        }
-      } else {
-        ctx.fillStyle = "green";
-        ctx.beginPath();
-        ctx.arc(cluster.cx, cluster.cy, 8, 0, 2 * Math.PI);
-        ctx.fill();
-      }
+      await drawCategoryIconAt(
+        ctx,
+        cluster.categoryId,
+        cluster.cx,
+        cluster.cy,
+        clusterIconSize,
+        8
+      );
 
       // Count badge: only show number when count > 1 (never show "1")
       if (cluster.count > 1) {
@@ -294,26 +307,19 @@ export async function drawTreesOnCanvas(
     const clusterIconSize = scaledIconSize(26, 15, iconScaleByZoom);
     const halfIcon = clusterIconSize / 2;
     const iconSizeSingle = scaledIconSize(36, 15, iconScaleByZoom);
-    const halfSingle = iconSizeSingle / 2;
 
     for (const cluster of clusters) {
       if (cluster.count >= CLUSTER_ZOOM15_DENSE_THRESHOLD && cluster.trees) {
         const drawX = cluster.cx - halfIcon;
         const drawY = cluster.cy - halfIcon;
-        const categoryId = cluster.categoryId;
-        const iconFile = categoryId ? iconMap[String(categoryId)] : undefined;
-        if (iconFile) {
-          if (!iconCache[iconFile]) {
-            const iconPath = path.resolve(process.cwd(), "src/assets/icons", iconFile);
-            iconCache[iconFile] = await loadImage(iconPath);
-          }
-          ctx.drawImage(iconCache[iconFile], drawX, drawY, clusterIconSize, clusterIconSize);
-        } else {
-          ctx.fillStyle = "green";
-          ctx.beginPath();
-          ctx.arc(cluster.cx, cluster.cy, 8, 0, 2 * Math.PI);
-          ctx.fill();
-        }
+        await drawCategoryIconAt(
+          ctx,
+          cluster.categoryId,
+          cluster.cx,
+          cluster.cy,
+          clusterIconSize,
+          8
+        );
         const badgeX = drawX + clusterIconSize - 4;
         const badgeY = drawY + 4;
         const badgeR = 14;
@@ -334,22 +340,14 @@ export async function drawTreesOnCanvas(
         for (const tree of cluster.trees) {
           const px = ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * tileSize;
           const py = ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) * tileSize;
-          const categoryId = tree.species?.category?.id;
-          const iconFile = categoryId ? iconMap[String(categoryId)] : undefined;
-          if (iconFile) {
-            if (!iconCache[iconFile]) {
-              const iconPath = path.resolve(process.cwd(), "src/assets/icons", iconFile);
-              iconCache[iconFile] = await loadImage(iconPath);
-            }
-            const drawX = px - halfSingle;
-            const drawY = py - halfSingle;
-            ctx.drawImage(iconCache[iconFile], drawX, drawY, iconSizeSingle, iconSizeSingle);
-          } else {
-            ctx.fillStyle = "green";
-            ctx.beginPath();
-            ctx.arc(px, py, 4, 0, 2 * Math.PI);
-            ctx.fill();
-          }
+          await drawCategoryIconAt(
+            ctx,
+            tree.species?.category?.id,
+            px,
+            py,
+            iconSizeSingle,
+            4
+          );
         }
       }
     }
@@ -361,27 +359,8 @@ export async function drawTreesOnCanvas(
     const px = ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * tileSize;
     const py = ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) * tileSize;
 
-    const categoryId = tree.species?.category?.id;
-    const iconFile = categoryId ? iconMap[String(categoryId)] : undefined;
-
-    if (iconFile) {
-      if (!iconCache[iconFile]) {
-        const iconPath = path.resolve(process.cwd(), "src/assets/icons", iconFile);
-        iconCache[iconFile] = await loadImage(iconPath);
-      }
-      const icon = iconCache[iconFile];
-
-      const size = scaledIconSize(72 + (z - 15) * 12, z, iconScaleByZoom);
-      const half = size / 2;
-      const drawX = px - half;
-      const drawY = py - half;
-      ctx.drawImage(icon, drawX, drawY, size, size);
-    } else {
-      ctx.fillStyle = "green";
-      ctx.beginPath();
-      ctx.arc(px, py, 4, 0, 2 * Math.PI);
-      ctx.fill();
-    }
+    const size = scaledIconSize(72 + (z - 15) * 12, z, iconScaleByZoom);
+    await drawCategoryIconAt(ctx, tree.species?.category?.id, px, py, size, 4);
   }
 
   return canvas;
@@ -399,6 +378,8 @@ export async function renderTileToBuffer(
   superTileSize?: number,
   iconScaleByZoom?: IconScaleByZoom
 ): Promise<Buffer> {
+  await preloadAllCategoryIcons();
+
   const BLOCK_SIZE =
     typeof superTileSize === "number" && superTileSize > 1 ? Math.floor(superTileSize) : 0;
 
