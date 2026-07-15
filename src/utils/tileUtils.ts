@@ -3,6 +3,8 @@ import { loadCategoryIconImage, preloadAllCategoryIcons } from "./categoryIcons"
 import { scaledIconSize, type IconScaleByZoom } from "./tileIconScale";
 
 export interface Tree {
+  id?: number;
+  createdAt?: string;
   lat: number;
   lon: number;
   species?: {
@@ -11,6 +13,22 @@ export interface Tree {
       name: string;
     };
   };
+}
+
+export type PublishCutoff = {
+  createdAt: string;
+  treeId: number;
+};
+
+function treeWithinPublishCutoff(doc: Tree, cutoff: PublishCutoff): boolean {
+  const id = typeof doc.id === "number" ? doc.id : Number(doc.id);
+  if (!Number.isFinite(id)) return false;
+  const created = doc.createdAt ? new Date(doc.createdAt) : new Date(NaN);
+  const cutoffCreated = new Date(cutoff.createdAt);
+  if (Number.isNaN(created.getTime()) || Number.isNaN(cutoffCreated.getTime())) return false;
+  if (created.getTime() < cutoffCreated.getTime()) return true;
+  if (created.getTime() > cutoffCreated.getTime()) return false;
+  return id <= cutoff.treeId;
 }
 
 // Tile bounding box
@@ -83,7 +101,8 @@ async function fetchJsonWithRetry(url: string, maxRetries: number = 3): Promise<
 export async function fetchTreesInBBox(
   payloadUrl: string,
   bbox: ReturnType<typeof tileBBox>,
-  categoryId?: number
+  categoryId?: number,
+  publishCutoff?: PublishCutoff
 ): Promise<Tree[]> {
   let allDocs: Tree[] = [];
   let page = 1;
@@ -102,7 +121,8 @@ export async function fetchTreesInBBox(
     }
 
     const data = await fetchJsonWithRetry(url);
-    allDocs.push(...data.docs);
+    const docs = (data.docs ?? []) as Tree[];
+    allDocs.push(...(publishCutoff ? docs.filter((d) => treeWithinPublishCutoff(d, publishCutoff)) : docs));
     hasNext = data.hasNextPage;
     page++;
   }
@@ -376,7 +396,8 @@ export async function renderTileToBuffer(
   payloadUrl: string,
   categoryId?: number,
   superTileSize?: number,
-  iconScaleByZoom?: IconScaleByZoom
+  iconScaleByZoom?: IconScaleByZoom,
+  publishCutoff?: PublishCutoff
 ): Promise<Buffer> {
   await preloadAllCategoryIcons();
 
@@ -387,7 +408,7 @@ export async function renderTileToBuffer(
     const bbox = tileBBox(x, y, z);
     const bleed = iconBleedPixels(z, iconScaleByZoom);
     const fetchBBox = expandTileBBoxForMargin(bbox, bleed, RENDER_SIZE);
-    const trees = await fetchTreesInBBox(payloadUrl, fetchBBox, categoryId);
+    const trees = await fetchTreesInBBox(payloadUrl, fetchBBox, categoryId, publishCutoff);
     const canvas = await drawTreesOnCanvas(trees, bbox, z, RENDER_SIZE, iconScaleByZoom, bleed);
     if (bleed > 0) {
       return cropCanvasRegion(canvas, bleed, bleed, RENDER_SIZE);
@@ -416,7 +437,7 @@ export async function renderTileToBuffer(
   const blockRenderSize = RENDER_SIZE * BLOCK_SIZE;
   const bleed = iconBleedPixels(z, iconScaleByZoom);
   const fetchBBox = expandTileBBoxForMargin(blockBBox, bleed, blockRenderSize);
-  const trees = await fetchTreesInBBox(payloadUrl, fetchBBox, categoryId);
+  const trees = await fetchTreesInBBox(payloadUrl, fetchBBox, categoryId, publishCutoff);
   const bigCanvas = await drawTreesOnCanvas(
     trees,
     blockBBox,

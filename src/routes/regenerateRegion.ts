@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import sharp from "sharp";
 import PQueue from "p-queue";
-import { renderTileToBuffer } from "../utils/tileUtils";
+import { renderTileToBuffer, type PublishCutoff } from "../utils/tileUtils";
 import { uploadToS3 } from "../utils/s3/s3Utils";
 import { PAYLOAD_URL, TILE_UPLOAD_CONCURRENCY } from "../utils/config";
 import { getCategoryNameById } from "../utils/getCategoryNameById";
@@ -45,6 +45,8 @@ interface RegenerateRegionBody {
   chunkIndex?: number;
   /** Total chunk count for the same admin region run. */
   chunkTotal?: number;
+  /** Only draw trees at or before this admin publish cutoff. */
+  publishCutoff?: PublishCutoff;
 }
 
 function tileKey(t: TileCoord): string {
@@ -111,6 +113,12 @@ router.post("/", async (req: Request, res: Response) => {
       typeof body.chunkTotal === "number" && body.chunkTotal >= 1
         ? Math.floor(body.chunkTotal)
         : null;
+    const publishCutoff =
+      body.publishCutoff &&
+      typeof body.publishCutoff.createdAt === "string" &&
+      typeof body.publishCutoff.treeId === "number"
+        ? body.publishCutoff
+        : undefined;
     const chunkLabel =
       chunkIndex != null && chunkTotal != null ? `${chunkIndex}/${chunkTotal}` : null;
 
@@ -213,7 +221,8 @@ router.post("/", async (req: Request, res: Response) => {
                 PAYLOAD_URL,
                 layer.categoryId ?? undefined,
                 resolvedSuperTileSize,
-                iconScaleByZoom
+                iconScaleByZoom,
+                publishCutoff
               );
               const avifBuffer = await sharp(buffer).resize(256, 256).avif({ quality: 72 }).toBuffer();
               const s3Key =
