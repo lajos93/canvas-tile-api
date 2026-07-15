@@ -14,6 +14,8 @@ import appendIconRouter from "./routes/appendIcon";
 import addTreeWorkflowRouter from "./routes/addTreeWorkflow";
 import backupRouter from "./routes/backup";
 import restoreFromBackupRouter from "./routes/restoreFromBackup";
+import sliceIconsRouter from "./routes/sliceIcons";
+import speciesTaxonomyRouter from "./routes/speciesTaxonomy";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -71,6 +73,9 @@ app.use("/generate-region", generateRegionRouter);
 // species categories
 app.use("/species", speciesRouter);
 
+// species-categories → species parent/child tree from Payload
+app.use("/species-taxonomy", speciesTaxonomyRouter);
+
 // status.json read/update (GET + PUT)
 app.use("/status", statusRouter);
 
@@ -79,6 +84,9 @@ app.use("/backup", backupRouter);
 
 // restore: copy affected tiles from latest backup before treeCreatedAt back to live
 app.use("/restore-from-backup", restoreFromBackupRouter);
+
+// slice sprite sheet into individual 128×128 AVIF icons (src/icons/img.png → src/icons/output/)
+app.use("/slice-icons", sliceIconsRouter);
 
 app.listen(Number(PORT), "0.0.0.0", () => {
   console.log(`[server] canvas-tile-api started on port ${PORT}`);
