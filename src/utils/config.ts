@@ -1,6 +1,8 @@
-// concurrency (default = 5)
+// concurrency (default = 2)
+// Kept at/below the Payload PG pool size (max=3) so parallel tile jobs don't
+// exhaust DB connections and trigger "timeout exceeded when trying to connect".
 export const TILE_UPLOAD_CONCURRENCY = parseInt(
-  process.env.TILE_UPLOAD_CONCURRENCY ?? "5",
+  process.env.TILE_UPLOAD_CONCURRENCY ?? "2",
   10
 );
 

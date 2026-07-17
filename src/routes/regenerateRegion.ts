@@ -10,7 +10,9 @@ import { parseIconScaleByZoom, type IconScaleByZoom } from "../utils/tileIconSca
 import {
   compareTilesRowMajor,
   filterTilesForResume,
+  getAllFailedTiles,
   getLayerProgress,
+  recordTileResults,
   setLayerProgress,
   type TileCoord,
 } from "../utils/regenerateStatus";
@@ -35,6 +37,12 @@ interface RegenerateRegionBody {
   superTileSize?: number;
   /** Read last progress from status.json per layer and skip completed tiles. */
   resume?: boolean;
+  /**
+   * Re-render only tiles persisted in the failed-tile store (status.json).
+   * Ignores `layers`/`resume`/`startAfter`; on success tiles are removed from
+   * the store so repeated calls converge to zero remaining failures.
+   */
+  retryFailed?: boolean;
   /** Manual resume point (overrides status for matching layer when set). */
   startAfter?: StartAfterCoord;
   /** Redo this many tiles before the resume point (overlap for crashed runs). Default 0. */
@@ -81,18 +89,41 @@ function parseStartAfter(raw: unknown): StartAfterCoord | null {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const body = (req.body || {}) as RegenerateRegionBody;
-    const rawLayers = body.layers;
-
-    if (!Array.isArray(rawLayers) || rawLayers.length === 0) {
-      return res.status(400).json({ error: "Body must include non-empty layers array" });
-    }
+    const retryFailed = body.retryFailed === true;
 
     if (!PAYLOAD_URL) {
       return res.status(500).json({ error: "PAYLOAD_URL environment variable not set" });
     }
 
-    const resume = body.resume === true;
-    const manualStartAfter = parseStartAfter(body.startAfter);
+    let rawLayers: RegenerateRegionLayer[] = Array.isArray(body.layers) ? body.layers : [];
+
+    if (retryFailed) {
+      const stored = await getAllFailedTiles();
+      rawLayers = stored.map((s) => ({ categoryId: s.categoryId, tiles: s.tiles }));
+      const totalStored = stored.reduce((n, l) => n + l.tiles.length, 0);
+      console.log(
+        `[regenerate-region] retryFailed: ${totalStored} tile(s) across ${stored.length} layer(s)`
+      );
+      if (rawLayers.length === 0) {
+        return res.json({
+          ok: true,
+          tilesRegenerated: 0,
+          tilesPlanned: 0,
+          tilesSkipped: 0,
+          layers: 0,
+          failedTilesRemaining: 0,
+          message: "No failed tiles to retry",
+        });
+      }
+    }
+
+    if (!Array.isArray(rawLayers) || rawLayers.length === 0) {
+      return res.status(400).json({ error: "Body must include non-empty layers array" });
+    }
+
+    // retryFailed always re-renders the exact stored tiles — never skip via resume.
+    const resume = !retryFailed && body.resume === true;
+    const manualStartAfter = retryFailed ? null : parseStartAfter(body.startAfter);
     const backtrack =
       typeof body.resumeBacktrack === "number" && body.resumeBacktrack >= 0
         ? Math.floor(body.resumeBacktrack)
@@ -198,6 +229,10 @@ router.post("/", async (req: Request, res: Response) => {
     let tilesRegenerated = 0;
     let completed = 0;
     const failedTiles: TileCoord[] = [];
+    const succeededResults: Array<{ categoryId: number | null; tile: TileCoord }> = [];
+    const failedResults: Array<{ categoryId: number | null; tile: TileCoord }> = [];
+    const perZoomDone = new Map<number, number>();
+    const perZoomFailed = new Map<number, number>();
     const queue = new PQueue({ concurrency: TILE_UPLOAD_CONCURRENCY });
     const statusQueue = new PQueue({ concurrency: 1 });
     const jobs: Array<Promise<void>> = [];
@@ -231,10 +266,14 @@ router.post("/", async (req: Request, res: Response) => {
                   : `tiles/${z}/${x}/${y}.avif`;
               await uploadToS3(s3Key, avifBuffer, "image/avif");
               tilesRegenerated++;
+              perZoomDone.set(z, (perZoomDone.get(z) ?? 0) + 1);
+              succeededResults.push({ categoryId: layer.categoryId, tile: { z, x, y } });
               await statusQueue.add(() => setLayerProgress(z, layer.categoryId, { z, x, y }));
             } catch (err) {
               console.error(`[regenerate-region] z${z} x${x} y${y} category=${catLabel} failed:`, err);
               failedTiles.push({ z, x, y });
+              failedResults.push({ categoryId: layer.categoryId, tile: { z, x, y } });
+              perZoomFailed.set(z, (perZoomFailed.get(z) ?? 0) + 1);
             } finally {
               completed++;
               if (completed % 50 === 0 || completed === tilesPlanned) {
@@ -248,10 +287,57 @@ router.post("/", async (req: Request, res: Response) => {
 
     await Promise.all(jobs);
 
+    // Persist the run outcome: clear tiles that just succeeded from the failed
+    // store, add the ones that just failed. Enables `retryFailed` later.
+    const resultsByCat = new Map<number | null, { succeeded: TileCoord[]; failed: TileCoord[] }>();
+    for (const { categoryId, tile } of succeededResults) {
+      const entry = resultsByCat.get(categoryId) ?? { succeeded: [], failed: [] };
+      entry.succeeded.push(tile);
+      resultsByCat.set(categoryId, entry);
+    }
+    for (const { categoryId, tile } of failedResults) {
+      const entry = resultsByCat.get(categoryId) ?? { succeeded: [], failed: [] };
+      entry.failed.push(tile);
+      resultsByCat.set(categoryId, entry);
+    }
+    let failedTilesRemaining: number | undefined;
+    try {
+      await recordTileResults(
+        Array.from(resultsByCat.entries()).map(([categoryId, v]) => ({
+          categoryId,
+          succeeded: v.succeeded,
+          failed: v.failed,
+        }))
+      );
+      const remaining = await getAllFailedTiles();
+      failedTilesRemaining = remaining.reduce((n, l) => n + l.tiles.length, 0);
+    } catch (err) {
+      console.error("[regenerate-region] failed to persist failed-tile store:", err);
+    }
+
     console.log(
       chunkLabel
         ? `[regenerate-region] chunk ${chunkLabel} done: ${tilesRegenerated}/${tilesPlanned} tiles, failed=${failedTiles.length}`
         : `[regenerate-region] done: ${tilesRegenerated}/${tilesPlanned} tiles, skipped=${totalSkipped}, failed=${failedTiles.length}`
+    );
+
+    const allZooms = Array.from(
+      new Set<number>([...perZoomDone.keys(), ...perZoomFailed.keys()])
+    ).sort((a, b) => a - b);
+    const zoomSummary = allZooms
+      .map((z) => {
+        const done = perZoomDone.get(z) ?? 0;
+        const failed = perZoomFailed.get(z) ?? 0;
+        return failed > 0 ? `z${z}: ${done} ok / ${failed} failed` : `z${z}: ${done} ok`;
+      })
+      .join(", ");
+    const fullyDone = failedTiles.length === 0;
+    const banner = fullyDone ? "✅ FULLY DONE" : "⚠️ DONE WITH FAILURES";
+    const scopeLabel = chunkLabel ? `chunk ${chunkLabel}` : "region run";
+    console.log(
+      `[regenerate-region] ${banner} — ${scopeLabel}: ${tilesRegenerated}/${tilesPlanned} tiles, failed=${failedTiles.length}` +
+        (failedTilesRemaining != null ? `, stored-failures=${failedTilesRemaining}` : "") +
+        `\n[regenerate-region] zoom levels — ${zoomSummary || "none"}`
     );
 
     res.json({
@@ -261,6 +347,7 @@ router.post("/", async (req: Request, res: Response) => {
       tilesSkipped: totalSkipped,
       layers: layerPlans.length,
       failedTiles: failedTiles.length > 0 ? failedTiles : undefined,
+      failedTilesRemaining,
     });
   } catch (err) {
     console.error("[regenerate-region]", err);
