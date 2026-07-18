@@ -41,6 +41,42 @@ export function tileBBox(x: number, y: number, z: number) {
   return { lon_left, lon_right, lat_top, lat_bottom };
 }
 
+/** Web Mercator max latitude (EPSG:3857 / Leaflet). */
+const MERCATOR_MAX_LAT = 85.05112878;
+
+/** Web Mercator normalized Y in [0, 1] (north → 0). Matches Leaflet CRS.EPSG3857. */
+export function latToMercatorY(lat: number): number {
+  const clamped = Math.max(-MERCATOR_MAX_LAT, Math.min(MERCATOR_MAX_LAT, lat));
+  const latRad = (clamped * Math.PI) / 180;
+  return (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2;
+}
+
+export type TileGeoBBox = {
+  lon_left: number;
+  lon_right: number;
+  lat_top: number;
+  lat_bottom: number;
+};
+
+/**
+ * Project lon/lat into pixel space for a tile (or super-tile) bbox.
+ * Lon→X is linear (correct for Web Mercator). Lat→Y uses Mercator Y, not linear
+ * latitude — so baked icons align with Leaflet markers. Works for single tiles
+ * and N×N super-tile blocks whose bbox spans multiple tile indices.
+ */
+export function latLonToPixel(
+  lat: number,
+  lon: number,
+  bbox: TileGeoBBox,
+  tileSize: number
+): { px: number; py: number } {
+  const px = ((lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * tileSize;
+  const yTop = latToMercatorY(bbox.lat_top);
+  const yBottom = latToMercatorY(bbox.lat_bottom);
+  const py = ((latToMercatorY(lat) - yTop) / (yBottom - yTop)) * tileSize;
+  return { px, py };
+}
+
 /**
  * Expand a tile bbox in all directions by a pixel margin (converted to lat/lon).
  * This lets us fetch trees that live just outside the tile, so that icons/clusters
@@ -216,8 +252,7 @@ function clusterTrees(
   >();
 
   for (const tree of trees) {
-    const px = ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * tileSize;
-    const py = ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) * tileSize;
+    const { px, py } = latLonToPixel(tree.lat, tree.lon, bbox, tileSize);
     const gx = Math.floor(px / cellSize);
     const gy = Math.floor(py / cellSize);
     const categoryId = tree.species?.category?.id;
@@ -238,14 +273,9 @@ function clusterTrees(
 
   const clusters: Cluster[] = [];
   for (const entry of map.values()) {
-    const cx =
-      ((entry.lons.reduce((a, b) => a + b, 0) / entry.lons.length - bbox.lon_left) /
-        (bbox.lon_right - bbox.lon_left)) *
-      tileSize;
-    const cy =
-      ((bbox.lat_top - entry.lats.reduce((a, b) => a + b, 0) / entry.lats.length) /
-        (bbox.lat_top - bbox.lat_bottom)) *
-      tileSize;
+    const meanLon = entry.lons.reduce((a, b) => a + b, 0) / entry.lons.length;
+    const meanLat = entry.lats.reduce((a, b) => a + b, 0) / entry.lats.length;
+    const { px: cx, py: cy } = latLonToPixel(meanLat, meanLon, bbox, tileSize);
     clusters.push({
       cx,
       cy,
@@ -358,8 +388,7 @@ export async function drawTreesOnCanvas(
         ctx.fillText(label, badgeX, badgeY);
       } else if (cluster.trees) {
         for (const tree of cluster.trees) {
-          const px = ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * tileSize;
-          const py = ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) * tileSize;
+          const { px, py } = latLonToPixel(tree.lat, tree.lon, bbox, tileSize);
           await drawCategoryIconAt(
             ctx,
             tree.species?.category?.id,
@@ -376,8 +405,7 @@ export async function drawTreesOnCanvas(
 
   // z ≥ 16: draw every tree individually
   for (const tree of trees) {
-    const px = ((tree.lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * tileSize;
-    const py = ((bbox.lat_top - tree.lat) / (bbox.lat_top - bbox.lat_bottom)) * tileSize;
+    const { px, py } = latLonToPixel(tree.lat, tree.lon, bbox, tileSize);
 
     const size = scaledIconSize(72 + (z - 15) * 12, z, iconScaleByZoom);
     await drawCategoryIconAt(ctx, tree.species?.category?.id, px, py, size, 4);

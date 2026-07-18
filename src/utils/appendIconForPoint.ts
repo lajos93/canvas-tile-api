@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { renderTileToBuffer, tileBBox } from "./tileUtils";
+import { latLonToPixel, renderTileToBuffer, tileBBox } from "./tileUtils";
 import { uploadToS3, getS3ObjectBuffer } from "./s3/s3Utils";
 import { PAYLOAD_URL } from "./config";
 import { lat2tile, lon2tile } from "./geoBounds";
@@ -55,8 +55,7 @@ async function compositeIconOntoTile(
   bbox: { lon_left: number; lon_right: number; lat_top: number; lat_bottom: number },
   iconSize: number
 ): Promise<Buffer> {
-  const px = ((lon - bbox.lon_left) / (bbox.lon_right - bbox.lon_left)) * TILE_SIZE;
-  const py = ((bbox.lat_top - lat) / (bbox.lat_top - bbox.lat_bottom)) * TILE_SIZE;
+  const { px, py } = latLonToPixel(lat, lon, bbox, TILE_SIZE);
   const half = iconSize / 2;
   const left = Math.round(px - half);
   const top = Math.round(py - half);
